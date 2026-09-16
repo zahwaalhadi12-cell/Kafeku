@@ -1,0 +1,10 @@
+{
+  "name": "Remix KafeKu",
+  "description": "Aplikasi ekosistem kafe hybrid dengan Pre-Order cerdas, tombol Saya Sudah Sampai, kasir manual hybrid offline-ready, kitchen display TTS, dan manajemen inventori.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
