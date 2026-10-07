@@ -202,6 +202,11 @@ export const KitchenKDS: React.FC<KitchenKDSProps> = ({
             const isWaiting = order.kitchenStatus === 'menunggu_kedatangan';
             const hasJustArrived = isPreOrder && order.hasArrived && order.kitchenStatus === 'antrean_dapur';
             const hasSensitive = order.items.some(i => i.isSensitive);
+            const isTakeaway = Boolean(
+              order.isTakeaway || 
+              order.tableNumber === 'Takeaway' || 
+              (order.tableNumber && (order.tableNumber.toLowerCase().includes('takeaway') || order.tableNumber.toLowerCase().includes('bungkus')))
+            );
 
             return (
               <div
@@ -236,10 +241,10 @@ export const KitchenKDS: React.FC<KitchenKDSProps> = ({
                       }`}>
                         {isPreOrder ? '📱 Pre-Order HP' : '📟 Kasir Meja'}
                       </span>
-                      {order.isTakeaway && (
+                      {isTakeaway && (
                         <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-orange-500 text-white border border-orange-300 shadow-sm animate-bounce">
                           <Package className="w-3 h-3" />
-                          <span>TAKEAWAY / BUNGKUS</span>
+                          <span>TAKEAWAY</span>
                         </span>
                       )}
                     </div>
@@ -258,14 +263,14 @@ export const KitchenKDS: React.FC<KitchenKDSProps> = ({
                 </div>
 
                 {/* SENSITIVITY & ARRIVAL STATUS BANNER */}
-                {order.isTakeaway && (
+                {isTakeaway && (
                   <div className="bg-orange-500 text-white px-3 py-1.5 text-xs font-black flex items-center justify-between shadow-xs">
                     <div className="flex items-center space-x-1.5">
                       <Package className="w-4 h-4 text-white animate-pulse" />
-                      <span>PACKING BUNGKUS / KEMASAN TAKEAWAY</span>
+                      <span>TAKEAWAY: KEMASAN BUNGKUS</span>
                     </div>
                     <span className="text-[10px] bg-white text-orange-700 px-2 py-0.5 rounded-full font-extrabold uppercase">
-                      Gunakan Paper Bag &amp; Box
+                      Box &amp; Cup Bawa Pulang
                     </span>
                   </div>
                 )}

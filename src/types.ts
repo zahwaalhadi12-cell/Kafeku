@@ -44,6 +44,17 @@ export interface CafeSettings {
 }
 
 export type StaffRole = 'admin' | 'kasir' | 'koki';
+export type UserRole = 'admin' | 'kasir' | 'dapur' | 'pelanggan';
+
+export interface UserSession {
+  id: string;
+  name: string;
+  username: string;
+  role: UserRole;
+  phone?: string;
+  avatar?: string;
+  loginTime?: string;
+}
 
 export interface StaffUser {
   id: string;

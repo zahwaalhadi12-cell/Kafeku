@@ -1,6 +1,7 @@
 import { MenuItem, Ingredient, Order, CafeSettings, StaffUser, CafeTable } from '../types.ts';
 
-export const INITIAL_INGREDIENTS: Ingredient[] = [
+// Data Sampel / Template (Hanya dimuat jika pengguna sengaja memilih 'Muat Ulang Template')
+export const SAMPLE_INGREDIENTS_TEMPLATES: Ingredient[] = [
   { id: 'ing_coffee', name: 'Biji Kopi Arabika Blend', stock: 4500, unit: 'gram', minStock: 1000, costPerUnit: 350 },
   { id: 'ing_milk', name: 'Susu Segar Pasteurisasi', stock: 12000, unit: 'ml', minStock: 3000, costPerUnit: 25 },
   { id: 'ing_aren', name: 'Gula Aren Organik Cair', stock: 3500, unit: 'ml', minStock: 800, costPerUnit: 40 },
@@ -12,7 +13,7 @@ export const INITIAL_INGREDIENTS: Ingredient[] = [
   { id: 'ing_cup', name: 'Eco Paper Cup & Lid', stock: 320, unit: 'pcs', minStock: 50, costPerUnit: 1200 },
 ];
 
-export const INITIAL_MENU: MenuItem[] = [
+export const SAMPLE_MENU_TEMPLATES: MenuItem[] = [
   {
     id: 'm_es_kopsu',
     name: 'Es Kopi Susu Gula Aren',
@@ -121,73 +122,20 @@ export const INITIAL_MENU: MenuItem[] = [
   },
 ];
 
-export const INITIAL_ORDERS: Order[] = [
-  {
-    id: 'ORD-1001',
-    source: 'preorder',
-    customerName: 'Budi Santoso',
-    customerPhone: '0812-3456-7890',
-    estimatedArrival: '10 menit lagi (Perjalanan Mobil)',
-    hasArrived: false,
-    items: [
-      { menuItemId: 'm_es_kopsu', name: 'Es Kopi Susu Gula Aren', price: 24000, quantity: 2, isSensitive: true, notes: 'Less sugar' },
-      { menuItemId: 'm_croissant_butter', name: 'Croissant Butter Panggang', price: 26000, quantity: 1, isSensitive: true },
-    ],
-    totalAmount: 74000,
-    paymentMethod: 'qris',
-    paymentStatus: 'paid',
-    isNonRefundable: true,
-    kitchenStatus: 'menunggu_kedatangan',
-    createdAt: new Date(Date.now() - 1000 * 60 * 8).toISOString(),
-  },
-  {
-    id: 'ORD-1002',
-    source: 'preorder',
-    customerName: 'Siti Rahmawati',
-    customerPhone: '0813-9876-5432',
-    estimatedArrival: 'Tiba Sekarang',
-    hasArrived: true,
-    arrivedAt: new Date(Date.now() - 1000 * 60 * 2).toISOString(),
-    items: [
-      { menuItemId: 'm_hot_cappuccino', name: 'Hot Cappuccino Velvety', price: 28000, quantity: 1, isSensitive: true },
-      { menuItemId: 'm_nasi_goreng', name: 'Nasi Goreng Kafe Spesial', price: 38000, quantity: 1, isSensitive: true, notes: 'Pedas sedang' },
-    ],
-    totalAmount: 66000,
-    paymentMethod: 'qris',
-    paymentStatus: 'paid',
-    isNonRefundable: true,
-    kitchenStatus: 'sedang_dimasak',
-    createdAt: new Date(Date.now() - 1000 * 60 * 15).toISOString(),
-  },
-  {
-    id: 'ORD-1003',
-    source: 'cashier',
-    customerName: 'Pak Hendra (Meja 04)',
-    items: [
-      { menuItemId: 'm_es_kopsu', name: 'Es Kopi Susu Gula Aren', price: 24000, quantity: 1, isSensitive: true },
-      { menuItemId: 'm_truffle_fries', name: 'Truffle Fries Renyah', price: 30000, quantity: 1, isSensitive: true },
-    ],
-    totalAmount: 54000,
-    paymentMethod: 'cash',
-    cashReceived: 60000,
-    cashChange: 6000,
-    paymentStatus: 'paid',
-    isNonRefundable: false,
-    hasArrived: true,
-    kitchenStatus: 'antrean_dapur',
-    createdAt: new Date(Date.now() - 1000 * 60 * 3).toISOString(),
-  }
-];
+// Data Awal Bersih (Tanpa Sampel / Zero-Data Ready)
+export const INITIAL_INGREDIENTS: Ingredient[] = [];
+export const INITIAL_MENU: MenuItem[] = [];
+export const INITIAL_ORDERS: Order[] = [];
 
 export const INITIAL_TABLES: CafeTable[] = [
   { id: 'tbl_01', number: 1, name: 'Meja 01', capacity: 2, status: 'tersedia' },
   { id: 'tbl_02', number: 2, name: 'Meja 02', capacity: 4, status: 'tersedia' },
   { id: 'tbl_03', number: 3, name: 'Meja 03', capacity: 2, status: 'tersedia' },
-  { id: 'tbl_04', number: 4, name: 'Meja 04', capacity: 4, status: 'terisi', assignedOrder: 'ORD-1003' },
+  { id: 'tbl_04', number: 4, name: 'Meja 04', capacity: 4, status: 'tersedia' },
   { id: 'tbl_05', number: 5, name: 'Meja 05', capacity: 6, status: 'tersedia' },
   { id: 'tbl_06', number: 6, name: 'Meja 06', capacity: 2, status: 'tersedia' },
   { id: 'tbl_07', number: 7, name: 'Meja 07', capacity: 4, status: 'tersedia' },
-  { id: 'tbl_08', number: 8, name: 'Meja 08', capacity: 4, status: 'ditutup' },
+  { id: 'tbl_08', number: 8, name: 'Meja 08', capacity: 4, status: 'tersedia' },
   { id: 'tbl_09', number: 9, name: 'Meja 09', capacity: 6, status: 'tersedia' },
   { id: 'tbl_10', number: 10, name: 'Meja 10', capacity: 8, status: 'tersedia' },
 ];
@@ -216,16 +164,16 @@ export const INITIAL_STAFF: StaffUser[] = [
   },
   {
     id: 'stf_02',
-    name: 'Siti Rahma',
+    name: 'Kasir KafeKu (Siti Rahma)',
     role: 'kasir',
-    username: 'siti_kasir',
+    username: 'kasir',
     pin: '1234',
     status: 'aktif',
     createdAt: '2026-02-10',
   },
   {
     id: 'stf_03',
-    name: 'Doni Pratama',
+    name: 'Doni Pratama (Kasir 2)',
     role: 'kasir',
     username: 'doni_kasir',
     pin: '2345',
@@ -234,21 +182,73 @@ export const INITIAL_STAFF: StaffUser[] = [
   },
   {
     id: 'stf_04',
-    name: 'Chef Aris',
+    name: 'Kepala Dapur (Chef Aris)',
     role: 'koki',
-    username: 'chef_aris',
+    username: 'dapur',
     pin: '3456',
     status: 'aktif',
     createdAt: '2026-01-15',
   },
   {
     id: 'stf_05',
-    name: 'Bayu Pamungkas',
+    name: 'Bayu Pamungkas (Koki 2)',
     role: 'koki',
     username: 'bayu_koki',
     pin: '4567',
     status: 'aktif',
     createdAt: '2026-02-20',
+  },
+];
+
+// Akun Demo Bawaan untuk Login dan Pemisahan 4 Peran
+export const DEFAULT_ACCOUNTS = [
+  {
+    role: 'admin' as const,
+    roleTitle: 'Admin & Pengelola',
+    badge: 'AKSES PENUH',
+    username: 'admin',
+    pin: '9999',
+    name: 'Admin KafeKu (Owner)',
+    description: 'Akses penuh kelola menu, inventori bahan, karyawan, meja, omzet, dan konfigurasi kafe.',
+    color: 'from-stone-800 to-stone-950',
+    accentColor: 'text-amber-400',
+    borderColor: 'border-stone-700',
+  },
+  {
+    role: 'pelanggan' as const,
+    roleTitle: 'Pelanggan Kafe',
+    badge: 'PRE-ORDER & MEJA',
+    username: 'pelanggan',
+    pin: '1234',
+    name: 'Pelanggan / Tamu',
+    description: 'Akses khusus pemesanan mandiri, bayar QRIS, estimasi kedatangan, dan tombol "Saya Sudah Sampai".',
+    color: 'from-amber-600 to-amber-800',
+    accentColor: 'text-amber-300',
+    borderColor: 'border-amber-400',
+  },
+  {
+    role: 'kasir' as const,
+    roleTitle: 'Kasir (POS)',
+    badge: 'TERMINAL KASIR',
+    username: 'kasir',
+    pin: '1234',
+    name: 'Siti Rahma (Kasir)',
+    description: 'Layar kasir walk-in, pembayaran tunai, kalkulator kembalian aman, dan cetak struk thermal.',
+    color: 'from-blue-600 to-indigo-800',
+    accentColor: 'text-blue-300',
+    borderColor: 'border-blue-400',
+  },
+  {
+    role: 'dapur' as const,
+    roleTitle: 'Dapur (KDS)',
+    badge: 'DISPLAY MASAK KOKI',
+    username: 'dapur',
+    pin: '3456',
+    name: 'Chef Aris (Kepala Dapur)',
+    description: 'Display tiket masak koki, antrean pesanan, dan panggilan otomatis suara Text-to-Speech (TTS).',
+    color: 'from-orange-600 to-red-700',
+    accentColor: 'text-orange-300',
+    borderColor: 'border-orange-400',
   },
 ];
 

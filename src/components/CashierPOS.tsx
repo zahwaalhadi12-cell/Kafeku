@@ -25,7 +25,8 @@ import {
   PhoneOff,
   Search,
   Snowflake,
-  Clock
+  Clock,
+  UtensilsCrossed
 } from 'lucide-react';
 
 interface CashierPOSProps {
@@ -237,11 +238,17 @@ export const CashierPOS: React.FC<CashierPOSProps> = ({
   const handleCompleteOrder = async () => {
     if (cart.length === 0) return;
 
+    const isTakeaway = tableNumber === 'Takeaway / Bungkus (Bawa Pulang)' || 
+      tableNumber.toLowerCase().includes('takeaway') || 
+      tableNumber.toLowerCase().includes('bungkus');
+
     const orderId = `KAS-${Date.now().toString().slice(-4)}`;
     const newOrder: Order = {
       id: orderId,
       source: 'cashier',
-      customerName: customerName || `Pelanggan Meja ${tableNumber}`,
+      customerName: customerName || (isTakeaway ? 'Pelanggan Takeaway' : `Pelanggan Meja ${tableNumber}`),
+      isTakeaway,
+      tableNumber: isTakeaway ? 'Takeaway' : tableNumber,
       items: cart,
       totalAmount,
       paymentMethod: 'cash',
@@ -651,6 +658,14 @@ export const CashierPOS: React.FC<CashierPOSProps> = ({
               );
             })}
           </div>
+
+          {filteredMenu.length === 0 && (
+            <div className="bg-stone-50 rounded-2xl border border-stone-200 p-8 text-center space-y-2">
+              <UtensilsCrossed className="w-8 h-8 text-stone-300 mx-auto" />
+              <p className="text-xs font-bold text-stone-700">Katalog menu kasir belum terisi</p>
+              <p className="text-[11px] text-stone-500">Buka menu Admin & Pengaturan untuk mendaftarkan menu kafe Anda.</p>
+            </div>
+          )}
         </div>
 
         {/* Right Side: Cash Register & Thermal Receipt Preview (5 cols) */}
@@ -698,30 +713,37 @@ export const CashierPOS: React.FC<CashierPOSProps> = ({
                 )}
               </div>
 
-              {tables && tables.length > 0 ? (
-                <select
-                  value={tableNumber}
-                  onChange={e => {
-                    setTableNumber(e.target.value);
-                    setCustomerName(`Pelanggan Meja ${e.target.value}`);
-                  }}
-                  className="w-full px-3 py-2 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-500 font-mono font-bold bg-white"
-                >
-                  {tables.map(tbl => (
+              <select
+                id="select-pos-table"
+                value={tableNumber}
+                onChange={e => {
+                  const val = e.target.value;
+                  setTableNumber(val);
+                  if (val === 'Takeaway / Bungkus (Bawa Pulang)' || val.toLowerCase().includes('takeaway')) {
+                    setCustomerName('Pelanggan Takeaway');
+                  } else {
+                    setCustomerName(`Pelanggan Meja ${val}`);
+                  }
+                }}
+                className="w-full px-3 py-2 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-500 font-bold bg-white text-xs text-stone-800"
+              >
+                <option value="Takeaway / Bungkus (Bawa Pulang)" className="font-extrabold text-orange-700 bg-orange-50">
+                  📦 Takeaway / Bungkus (Bawa Pulang)
+                </option>
+                {tables && tables.length > 0 ? (
+                  tables.map(tbl => (
                     <option key={tbl.id} value={tbl.number < 10 ? '0' + tbl.number : String(tbl.number)}>
-                      {tbl.name} ({tbl.status.toUpperCase()} • {tbl.capacity} Kursi)
+                      Meja {tbl.number < 10 ? '0' + tbl.number : tbl.number} - {tbl.name} ({tbl.status.toUpperCase()} • {tbl.capacity} Kursi)
                     </option>
-                  ))}
-                </select>
-              ) : (
-                <input
-                  type="text"
-                  value={tableNumber}
-                  onChange={e => setTableNumber(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-500 font-mono"
-                  placeholder="01"
-                />
-              )}
+                  ))
+                ) : (
+                  Array.from({ length: 12 }).map((_, idx) => (
+                    <option key={idx} value={idx + 1 < 10 ? '0' + (idx + 1) : String(idx + 1)}>
+                      Meja {idx + 1 < 10 ? '0' + (idx + 1) : String(idx + 1)}
+                    </option>
+                  ))
+                )}
+              </select>
             </div>
           </div>
 
@@ -741,18 +763,33 @@ export const CashierPOS: React.FC<CashierPOSProps> = ({
                     </div>
                   </div>
                   <div className="flex items-center space-x-1.5">
+                    {/* Tombol Minus (-) untuk kurangi porsi */}
                     <button
+                      type="button"
                       onClick={() => updateQuantity(item.menuItemId, -1)}
-                      className="w-6 h-6 rounded bg-stone-100 hover:bg-stone-200 flex items-center justify-center font-bold"
+                      title="Kurangi porsi (-1)"
+                      className="w-6 h-6 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-700 flex items-center justify-center font-bold text-sm transition-colors cursor-pointer"
                     >
-                      -
+                      <Minus className="w-3.5 h-3.5" />
                     </button>
-                    <span className="font-bold text-stone-800 w-4 text-center">{item.quantity}</span>
+                    <span className="font-extrabold text-stone-900 w-5 text-center font-mono">{item.quantity}</span>
+                    {/* Tombol Plus (+) untuk tambah porsi */}
                     <button
+                      type="button"
                       onClick={() => updateQuantity(item.menuItemId, 1)}
-                      className="w-6 h-6 rounded bg-stone-100 hover:bg-stone-200 flex items-center justify-center font-bold"
+                      title="Tambah porsi (+1)"
+                      className="w-6 h-6 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-700 flex items-center justify-center font-bold text-sm transition-colors cursor-pointer"
                     >
-                      +
+                      <Plus className="w-3.5 h-3.5" />
+                    </button>
+                    {/* Tombol Silang (X) untuk langsung membatalkan / menghapus item jika salah klik */}
+                    <button
+                      type="button"
+                      onClick={() => setCart(prev => prev.filter(i => i.menuItemId !== item.menuItemId))}
+                      title="Batalkan / Hapus item ini (X)"
+                      className="w-6 h-6 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 flex items-center justify-center font-bold transition-colors ml-1 cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
                     </button>
                   </div>
                 </div>
@@ -814,7 +851,11 @@ export const CashierPOS: React.FC<CashierPOSProps> = ({
                   value={cashReceived || ''}
                   onChange={e => setCashReceived(Number(e.target.value) || 0)}
                   placeholder={totalAmount.toString()}
-                  className="w-full px-3 py-2 rounded-xl border border-stone-300 focus:outline-none focus:ring-2 focus:ring-amber-500 font-mono font-bold"
+                  className={`w-full px-3 py-2 rounded-xl border focus:outline-none focus:ring-2 font-mono font-bold ${
+                    cashReceived > 0 && cashReceived < totalAmount
+                      ? 'border-red-400 bg-red-50/50 text-red-900 focus:ring-red-400'
+                      : 'border-stone-300 focus:ring-amber-500'
+                  }`}
                 />
               </div>
 
@@ -825,6 +866,17 @@ export const CashierPOS: React.FC<CashierPOSProps> = ({
                 </div>
               </div>
             </div>
+
+            {/* Proteksi Uang Kurang: Peringatan Merah */}
+            {cashReceived > 0 && cashReceived < totalAmount && (
+              <div 
+                id="alert-insufficient-cash" 
+                className="p-3 bg-red-100 border-2 border-red-400 text-red-800 rounded-xl flex items-center space-x-2 text-xs font-extrabold animate-pulse shadow-xs"
+              >
+                <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
+                <span>Uang yang diterima kurang! (Kurang {formatRupiah(totalAmount - cashReceived)})</span>
+              </div>
+            )}
           </div>
 
           {/* Submit and Print Receipt Button */}
@@ -833,7 +885,7 @@ export const CashierPOS: React.FC<CashierPOSProps> = ({
               id="btn-complete-cashier-order"
               disabled={cart.length === 0 || (cashReceived > 0 && cashReceived < totalAmount)}
               onClick={handleCompleteOrder}
-              className="w-full bg-stone-900 hover:bg-stone-800 disabled:bg-stone-300 disabled:cursor-not-allowed text-white font-bold py-3 px-4 rounded-xl shadow-md transition-colors flex items-center justify-center space-x-2 text-sm"
+              className="w-full bg-stone-900 hover:bg-stone-800 disabled:bg-stone-300 disabled:cursor-not-allowed text-white font-bold py-3 px-4 rounded-xl shadow-md transition-colors flex items-center justify-center space-x-2 text-sm cursor-pointer"
             >
               <Printer className="w-4 h-4 text-amber-400" />
               <span>Simpan & Cetak Struk Kertas</span>

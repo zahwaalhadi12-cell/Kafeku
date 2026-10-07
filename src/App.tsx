@@ -6,12 +6,43 @@ import { KitchenKDS } from './components/KitchenKDS.tsx';
 import { OwnerDashboard } from './components/OwnerDashboard.tsx';
 import { AdminSettings } from './components/AdminSettings.tsx';
 import { MvpEstimateModal } from './components/MvpEstimateModal.tsx';
+import { RoleAccessModal } from './components/RoleAccessModal.tsx';
 import { MenuItem, Order, Ingredient, FinancialReport, KitchenStatus, CafeSettings, StaffUser } from './types.ts';
 import { INITIAL_MENU, INITIAL_INGREDIENTS, INITIAL_ORDERS, INITIAL_SETTINGS, INITIAL_STAFF } from './data/mockData.ts';
 import { announceOrderToKitchen } from './utils/audio.ts';
 
+// Helper to parse role and standalone mode from pathname and search params
+const getInitialRoleAndKiosk = (): { tab: AppTab; standalone: boolean } => {
+  if (typeof window === 'undefined') return { tab: 'customer', standalone: false };
+  const path = window.location.pathname.toLowerCase();
+  const search = new URLSearchParams(window.location.search);
+  const roleQuery = (search.get('role') || '').toLowerCase();
+  const isKiosk = search.get('standalone') === 'true' || search.get('kios') === 'true';
+
+  if (path.includes('/cashier') || path.includes('/kasir') || path.includes('/pos') || ['cashier', 'kasir', 'pos'].includes(roleQuery)) {
+    return { tab: 'cashier', standalone: isKiosk };
+  }
+  if (path.includes('/kitchen') || path.includes('/dapur') || path.includes('/kds') || ['kitchen', 'dapur', 'kds'].includes(roleQuery)) {
+    return { tab: 'kitchen', standalone: isKiosk };
+  }
+  if (path.includes('/owner') || path.includes('/laporan') || ['owner', 'laporan'].includes(roleQuery)) {
+    return { tab: 'owner', standalone: isKiosk };
+  }
+  if (path.includes('/admin') || roleQuery === 'admin') {
+    return { tab: 'admin', standalone: isKiosk };
+  }
+  if (path.includes('/customer') || path.includes('/pelanggan') || ['customer', 'pelanggan'].includes(roleQuery)) {
+    return { tab: 'customer', standalone: isKiosk };
+  }
+  return { tab: 'customer', standalone: isKiosk };
+};
+
 export default function App() {
-  const [activeTab, setActiveTab] = useState<AppTab>('customer');
+  const initialConfig = getInitialRoleAndKiosk();
+  const [activeTab, setActiveTabState] = useState<AppTab>(initialConfig.tab);
+  const [isStandalone, setIsStandalone] = useState<boolean>(initialConfig.standalone);
+  const [showRoleAccessModal, setShowRoleAccessModal] = useState<boolean>(false);
+
   const [menuList, setMenuList] = useState<MenuItem[]>(INITIAL_MENU);
   const [ingredients, setIngredients] = useState<Ingredient[]>(INITIAL_INGREDIENTS);
   const [orders, setOrders] = useState<Order[]>(INITIAL_ORDERS);
@@ -19,20 +50,57 @@ export default function App() {
   const [staffList, setStaffList] = useState<StaffUser[]>(INITIAL_STAFF);
   const [currentStaffUser, setCurrentStaffUser] = useState<StaffUser | null>(null);
   const [report, setReport] = useState<FinancialReport>({
-    totalRevenue: 194000,
-    totalOrders: 3,
-    preOrderRevenue: 140000,
-    cashierRevenue: 54000,
-    qrisRevenue: 140000,
-    cashRevenue: 54000,
+    totalRevenue: 0,
+    totalOrders: 0,
+    preOrderRevenue: 0,
+    cashierRevenue: 0,
+    qrisRevenue: 0,
+    cashRevenue: 0,
     noShowCount: 0,
     noShowProtectedRevenue: 0,
-    inventoryValue: 1250000,
+    inventoryValue: 0,
   });
 
   const [isOfflineMode, setIsOfflineMode] = useState<boolean>(false);
   const [audioAlertsEnabled, setAudioAlertsEnabled] = useState<boolean>(true);
   const [showEstimateModal, setShowEstimateModal] = useState<boolean>(false);
+
+  // Tab switcher with URL history sync
+  const handleTabChange = (newTab: AppTab, updateUrl = true) => {
+    setActiveTabState(newTab);
+    if (updateUrl && typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      url.searchParams.set('role', newTab);
+      if (isStandalone) {
+        url.searchParams.set('standalone', 'true');
+      } else {
+        url.searchParams.delete('standalone');
+      }
+      window.history.pushState({ tab: newTab, standalone: isStandalone }, '', url.toString());
+    }
+  };
+
+  // Exit standalone kiosk mode
+  const handleExitStandalone = () => {
+    setIsStandalone(false);
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('standalone');
+      url.searchParams.delete('kios');
+      window.history.replaceState({ tab: activeTab, standalone: false }, '', url.toString());
+    }
+  };
+
+  // Handle browser back / forward navigation
+  useEffect(() => {
+    const handlePopState = () => {
+      const cfg = getInitialRoleAndKiosk();
+      setActiveTabState(cfg.tab);
+      setIsStandalone(cfg.standalone);
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
 
   // Keep track of previous orders count to trigger audio TTS on newly created orders
   const prevOrderCountRef = useRef<number>(orders.length);
@@ -266,10 +334,11 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-stone-100 flex flex-col font-sans selection:bg-amber-200">
-      {/* Global Navigation Header */}
+      {/* Global Navigation Header with Role Access & Standalone Kiosk Support */}
       <Header
+        cafeName={settings.cafeName}
         activeTab={activeTab}
-        setActiveTab={setActiveTab}
+        setActiveTab={handleTabChange}
         activeOrderCount={activeOrderCount}
         kitchenWaitingCount={kitchenWaitingCount}
         isOfflineMode={isOfflineMode}
@@ -277,6 +346,9 @@ export default function App() {
         audioAlertsEnabled={audioAlertsEnabled}
         setAudioAlertsEnabled={setAudioAlertsEnabled}
         onOpenEstimate={() => setShowEstimateModal(true)}
+        onOpenRoleAccess={() => setShowRoleAccessModal(true)}
+        isStandalone={isStandalone}
+        onExitStandalone={handleExitStandalone}
       />
 
       {/* Main Content Area */}
@@ -293,7 +365,7 @@ export default function App() {
             <button
               onClick={() => {
                 setCurrentStaffUser(null);
-                setActiveTab('admin');
+                handleTabChange('admin');
               }}
               className="text-amber-200 hover:text-white font-bold underline cursor-pointer text-[11px]"
             >
@@ -314,17 +386,17 @@ export default function App() {
             </p>
             <div className="flex justify-center space-x-3 pt-2">
               <button
-                onClick={() => setActiveTab('cashier')}
-                className="bg-amber-800 text-white text-xs font-bold px-4 py-2.5 rounded-xl hover:bg-amber-900 shadow-xs"
+                onClick={() => handleTabChange('cashier')}
+                className="bg-amber-800 text-white text-xs font-bold px-4 py-2.5 rounded-xl hover:bg-amber-900 shadow-xs cursor-pointer"
               >
                 Buka Kasir POS
               </button>
               <button
                 onClick={() => {
                   setCurrentStaffUser(null);
-                  setActiveTab('admin');
+                  handleTabChange('admin');
                 }}
-                className="bg-stone-100 text-stone-700 text-xs font-bold px-4 py-2.5 rounded-xl hover:bg-stone-200"
+                className="bg-stone-100 text-stone-700 text-xs font-bold px-4 py-2.5 rounded-xl hover:bg-stone-200 cursor-pointer"
               >
                 Kembali ke Admin
               </button>
@@ -341,17 +413,17 @@ export default function App() {
             </p>
             <div className="flex justify-center space-x-3 pt-2">
               <button
-                onClick={() => setActiveTab('kitchen')}
-                className="bg-orange-600 text-white text-xs font-bold px-4 py-2.5 rounded-xl hover:bg-orange-700 shadow-xs"
+                onClick={() => handleTabChange('kitchen')}
+                className="bg-orange-600 text-white text-xs font-bold px-4 py-2.5 rounded-xl hover:bg-orange-700 shadow-xs cursor-pointer"
               >
                 Buka Dapur KDS
               </button>
               <button
                 onClick={() => {
                   setCurrentStaffUser(null);
-                  setActiveTab('admin');
+                  handleTabChange('admin');
                 }}
-                className="bg-stone-100 text-stone-700 text-xs font-bold px-4 py-2.5 rounded-xl hover:bg-stone-200"
+                className="bg-stone-100 text-stone-700 text-xs font-bold px-4 py-2.5 rounded-xl hover:bg-stone-200 cursor-pointer"
               >
                 Kembali ke Admin
               </button>
@@ -420,11 +492,20 @@ export default function App() {
                 onUpdateStaff={setStaffList}
                 onSwitchStaffUser={setCurrentStaffUser}
                 onRefreshAll={fetchAllData}
+                onOpenRoleAccess={() => setShowRoleAccessModal(true)}
               />
             )}
           </>
         )}
       </main>
+
+      {/* Role Access & Deployment Center Modal */}
+      <RoleAccessModal
+        isOpen={showRoleAccessModal}
+        onClose={() => setShowRoleAccessModal(false)}
+        onSwitchTab={(tab) => handleTabChange(tab)}
+        cafeName={settings.cafeName}
+      />
 
       {/* MVP Estimation & Timeline Modal */}
       <MvpEstimateModal

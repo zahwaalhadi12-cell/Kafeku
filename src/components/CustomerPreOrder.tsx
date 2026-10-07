@@ -96,7 +96,10 @@ export const CustomerPreOrder: React.FC<CustomerPreOrderProps> = ({
 
     const arrivalLabel = `${arrivalMinutes} menit lagi (sekitar ${new Date(Date.now() + arrivalMinutes * 60000).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })})`;
 
-    const isTakeawayOrder = diningOption === 'takeaway';
+    const isTakeawayOrder = diningOption === 'takeaway' || 
+      diningOption === 'Takeaway / Bungkus (Bawa Pulang)' ||
+      diningOption.toLowerCase().includes('takeaway') || 
+      diningOption.toLowerCase().includes('bungkus');
     const chosenTable = isTakeawayOrder ? undefined : diningOption;
 
     const orderPayload: Partial<Order> = {
@@ -400,15 +403,22 @@ export const CustomerPreOrder: React.FC<CustomerPreOrderProps> = ({
                 >
                   <div>
                     {/* Item Image with Sensitivity Badge */}
-                    <div className="relative h-44 w-full overflow-hidden bg-stone-100">
-                      <img 
-                        src={item.imageUrl} 
-                        alt={item.name}
-                        referrerPolicy="no-referrer"
-                        className={`w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 ${
-                          !isAvailable ? 'grayscale-40' : ''
-                        }`} 
-                      />
+                    <div className="relative h-44 w-full overflow-hidden bg-stone-100 flex items-center justify-center">
+                      {item.imageUrl ? (
+                        <img 
+                          src={item.imageUrl} 
+                          alt={item.name}
+                          referrerPolicy="no-referrer"
+                          className={`w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 ${
+                            !isAvailable ? 'grayscale-40' : ''
+                          }`} 
+                        />
+                      ) : (
+                        <div className="flex flex-col items-center justify-center text-amber-700 p-4 space-y-1">
+                          <Coffee className="w-10 h-10 text-amber-600" />
+                          <span className="text-xs font-bold text-center">{item.name}</span>
+                        </div>
+                      )}
 
                       {/* Stock badge if out of stock */}
                       {!isAvailable && (
@@ -492,6 +502,18 @@ export const CustomerPreOrder: React.FC<CustomerPreOrderProps> = ({
               );
             })}
           </div>
+
+          {filteredMenu.length === 0 && (
+            <div className="bg-white rounded-3xl border border-stone-200 p-12 text-center space-y-3 shadow-xs">
+              <div className="w-14 h-14 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center mx-auto shadow-inner">
+                <Coffee className="w-7 h-7" />
+              </div>
+              <h3 className="font-extrabold text-stone-900 text-base">Belum Ada Menu yang Tersedia</h3>
+              <p className="text-xs text-stone-500 max-w-sm mx-auto">
+                Katalog menu kafe saat ini sedang kosong atau belum ada item pada kategori ini. Silakan hubungi kasir kafe atau cek kembali nanti.
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Right Column: Pre-Order Cart & Arrival Setup */}

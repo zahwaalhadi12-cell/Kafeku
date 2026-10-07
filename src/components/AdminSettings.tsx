@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   MenuItem, 
   MenuCategory, 
@@ -47,8 +47,88 @@ import {
   MapPin,
   Phone,
   Volume2,
-  Play
+  Play,
+  Layers,
+  Database,
+  Copy,
+  ExternalLink,
+  AlertCircle,
+  Upload,
+  Camera,
+  Sparkles,
+  Image as ImageIcon
 } from 'lucide-react';
+
+// Client-side image compressor for seamless local upload without external URLs
+const compressImageFile = (file: File, maxWidth = 600, maxHeight = 600, quality = 0.82): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > maxWidth) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          }
+        } else {
+          if (height > maxHeight) {
+            width = Math.round((width * maxHeight) / height);
+            height = maxHeight;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(e.target?.result as string);
+          return;
+        }
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = () => resolve(e.target?.result as string);
+      img.src = e.target?.result as string;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+};
+
+// Kurasi Foto Menu Estetik Cepat (Tanpa Perlu Ketik URL)
+const MENU_IMAGE_PRESETS: Record<MenuCategory, { title: string; url: string }[]> = {
+  kopi: [
+    { title: 'Es Kopi Susu Aren', url: 'https://images.unsplash.com/photo-1517701550927-30cf4ba1dba5?w=500&auto=format&fit=crop&q=80' },
+    { title: 'Hot Cappuccino', url: 'https://images.unsplash.com/photo-1534778101976-62847782c213?w=500&auto=format&fit=crop&q=80' },
+    { title: 'Iced Americano', url: 'https://images.unsplash.com/photo-1517701604599-bb29b565090c?w=500&auto=format&fit=crop&q=80' },
+    { title: 'Caramel Macchiato', url: 'https://images.unsplash.com/photo-1485808191679-5f86510681a2?w=500&auto=format&fit=crop&q=80' },
+    { title: 'Manual Brew V60', url: 'https://images.unsplash.com/photo-1514432324607-a09d9b4aefdd?w=500&auto=format&fit=crop&q=80' },
+  ],
+  'non-kopi': [
+    { title: 'Uji Matcha Latte', url: 'https://images.unsplash.com/photo-1536256263959-770b48d82b0a?w=500&auto=format&fit=crop&q=80' },
+    { title: 'Cokelat Hangat', url: 'https://images.unsplash.com/photo-1542990253-0d0f5be5f0ed?w=500&auto=format&fit=crop&q=80' },
+    { title: 'Earl Grey Tea', url: 'https://images.unsplash.com/photo-1576092768241-dec231879fc3?w=500&auto=format&fit=crop&q=80' },
+    { title: 'Fresh Lemon Tea', url: 'https://images.unsplash.com/photo-1556679343-c7306c1976bc?w=500&auto=format&fit=crop&q=80' },
+    { title: 'Taro Latte', url: 'https://images.unsplash.com/photo-1572490122747-3968b75cc699?w=500&auto=format&fit=crop&q=80' },
+  ],
+  makanan: [
+    { title: 'Nasi Goreng Spesial', url: 'https://images.unsplash.com/photo-1603133872878-684f208fb84b?w=500&auto=format&fit=crop&q=80' },
+    { title: 'Chicken Katsu Don', url: 'https://images.unsplash.com/photo-1569718212165-3a8278d5f624?w=500&auto=format&fit=crop&q=80' },
+    { title: 'Spaghetti Creamy', url: 'https://images.unsplash.com/photo-1612874742237-6526221588e3?w=500&auto=format&fit=crop&q=80' },
+    { title: 'Burger Daging Sapi', url: 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=500&auto=format&fit=crop&q=80' },
+  ],
+  snack: [
+    { title: 'Croissant Butter', url: 'https://images.unsplash.com/photo-1555507036-ab1f4038808a?w=500&auto=format&fit=crop&q=80' },
+    { title: 'Truffle French Fries', url: 'https://images.unsplash.com/photo-1576107232684-1279f3908594?w=500&auto=format&fit=crop&q=80' },
+    { title: 'Churros Cokelat', url: 'https://images.unsplash.com/photo-1624353365286-3f8d62daad51?w=500&auto=format&fit=crop&q=80' },
+    { title: 'Roti Panggang Kaya', url: 'https://images.unsplash.com/photo-1584776296944-ab6fb57b0bdd?w=500&auto=format&fit=crop&q=80' },
+  ],
+};
 
 interface AdminSettingsProps {
   menuList: MenuItem[];
@@ -61,9 +141,10 @@ interface AdminSettingsProps {
   onUpdateStaff: (staff: StaffUser[]) => void;
   onSwitchStaffUser: (user: StaffUser | null) => void;
   onRefreshAll: () => Promise<void>;
+  onOpenRoleAccess?: () => void;
 }
 
-type AdminSubTab = 'menu' | 'tables_ops' | 'staff' | 'financial_summary';
+export type AdminSubTab = 'menu' | 'tables_ops' | 'staff' | 'financial_summary' | 'supabase_db';
 
 export const AdminSettings: React.FC<AdminSettingsProps> = ({
   menuList,
@@ -76,6 +157,7 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
   onUpdateStaff,
   onSwitchStaffUser,
   onRefreshAll,
+  onOpenRoleAccess,
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<AdminSubTab>('menu');
 
@@ -95,6 +177,9 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
   const [menuFormSensitiveReason, setMenuFormSensitiveReason] = useState('');
   const [menuFormPrepTime, setMenuFormPrepTime] = useState<number>(4);
   const [menuFormImage, setMenuFormImage] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isCompressingImage, setIsCompressingImage] = useState(false);
+  const [showUrlInput, setShowUrlInput] = useState(false);
 
   // Table Management state
   const [showTableModal, setShowTableModal] = useState(false);
@@ -160,7 +245,235 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
     if (activeSubTab === 'financial_summary') {
       fetchTopSelling();
     }
+    if (activeSubTab === 'supabase_db') {
+      fetchSupabaseStatus();
+    }
   }, [activeSubTab]);
+
+  // Supabase Database state
+  const [supabaseStatus, setSupabaseStatus] = useState<{
+    connected: boolean;
+    url: string;
+    tables: {
+      menu: boolean;
+      inventory: boolean;
+      orders: boolean;
+      cafe_settings: boolean;
+      staff: boolean;
+    };
+    allReady: boolean;
+    schemaSql: string;
+  } | null>(null);
+  const [isLoadingSupabase, setIsLoadingSupabase] = useState(false);
+  const [isSeedingSupabase, setIsSeedingSupabase] = useState(false);
+  const [seedMessage, setSeedMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [copiedSql, setCopiedSql] = useState(false);
+  const [copiedUrl, setCopiedUrl] = useState(false);
+
+  const fetchSupabaseStatus = async (refresh = false) => {
+    setIsLoadingSupabase(true);
+    try {
+      const res = await fetch(`/api/supabase/status${refresh ? '?refresh=true' : ''}`);
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success) {
+          setSupabaseStatus(json);
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to fetch Supabase status:', err);
+    } finally {
+      setIsLoadingSupabase(false);
+    }
+  };
+
+  const handleSeedSupabase = async () => {
+    setIsSeedingSupabase(true);
+    setSeedMessage(null);
+    try {
+      const res = await fetch('/api/supabase/seed', { method: 'POST' });
+      const json = await res.json();
+      if (json.success) {
+        setSeedMessage({
+          type: 'success',
+          text: 'Data awal (menu, stok bahan baku, meja, staf, & pesanan) berhasil disinkronkan ke Supabase!',
+        });
+        await fetchSupabaseStatus(true);
+        await onRefreshAll();
+      } else {
+        setSeedMessage({
+          type: 'error',
+          text: json.error || 'Gagal sinkronisasi data ke Supabase. Pastikan tabel telah dibuat di SQL Editor.',
+        });
+      }
+    } catch (err: any) {
+      setSeedMessage({
+        type: 'error',
+        text: err?.message || 'Terjadi kesalahan saat menghubungi server.',
+      });
+    } finally {
+      setIsSeedingSupabase(false);
+    }
+  };
+
+  const handleCopySql = () => {
+    if (supabaseStatus?.schemaSql) {
+      navigator.clipboard.writeText(supabaseStatus.schemaSql);
+      setCopiedSql(true);
+      setTimeout(() => setCopiedSql(false), 2500);
+    }
+  };
+
+  const handleCopyUrl = () => {
+    if (supabaseStatus?.url) {
+      navigator.clipboard.writeText(supabaseStatus.url);
+      setCopiedUrl(true);
+      setTimeout(() => setCopiedUrl(false), 2500);
+    }
+  };
+
+  // Sample Data Reset state
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [resetFeedback, setResetFeedback] = useState<{ type: 'success' | 'info'; text: string } | null>(null);
+  const [isResetting, setIsResetting] = useState(false);
+
+  const handleClearOrders = async () => {
+    setIsResetting(true);
+    try {
+      const res = await fetch('/api/orders/clear', { method: 'POST' });
+      const json = await res.json();
+      if (json.success) {
+        await onRefreshAll();
+        setResetFeedback({
+          type: 'success',
+          text: 'Berhasil! Semua data pesanan & transaksi sampel telah dihapus. Riwayat transaksi, antrean dapur, dan omzet kini bersih (Rp 0).',
+        });
+      }
+    } catch {
+      setResetFeedback({ type: 'info', text: 'Gagal menghubungi server untuk menghapus pesanan.' });
+    } finally {
+      setIsResetting(false);
+    }
+  };
+
+  const handleClearMenu = async () => {
+    setIsResetting(true);
+    try {
+      onUpdateMenu([]);
+      const res = await fetch('/api/menu/clear', { method: 'POST' });
+      await res.json().catch(() => ({ success: true }));
+      setResetFeedback({
+        type: 'success',
+        text: 'Berhasil! Semua menu sampel telah dikosongkan.',
+      });
+    } catch {
+      onUpdateMenu([]);
+      setResetFeedback({ type: 'info', text: 'Menu telah dikosongkan secara lokal.' });
+    } finally {
+      setIsResetting(false);
+    }
+  };
+
+  const handleResetMenu = async () => {
+    setIsResetting(true);
+    try {
+      const res = await fetch('/api/menu/reset-default', { method: 'POST' });
+      const json = await res.json();
+      if (json.success && json.data) {
+        onUpdateMenu(json.data);
+        await onRefreshAll();
+        setResetFeedback({
+          type: 'success',
+          text: 'Menu template default berhasil dimuat ulang!',
+        });
+      }
+    } catch {
+      setResetFeedback({ type: 'info', text: 'Gagal memuat ulang menu template.' });
+    } finally {
+      setIsResetting(false);
+    }
+  };
+
+  const handleClearInventory = async () => {
+    setIsResetting(true);
+    try {
+      const res = await fetch('/api/inventory/clear', { method: 'POST' });
+      await res.json().catch(() => ({ success: true }));
+      await onRefreshAll();
+      setResetFeedback({
+        type: 'success',
+        text: 'Semua stok bahan baku sampel telah dikosongkan.',
+      });
+    } catch {
+      setResetFeedback({ type: 'info', text: 'Bahan baku telah dikosongkan.' });
+    } finally {
+      setIsResetting(false);
+    }
+  };
+
+  const handleResetInventory = async () => {
+    setIsResetting(true);
+    try {
+      const res = await fetch('/api/inventory/reset-default', { method: 'POST' });
+      const json = await res.json();
+      if (json.success && json.data) {
+        await onRefreshAll();
+        setResetFeedback({
+          type: 'success',
+          text: 'Bahan baku template default berhasil dimuat ulang!',
+        });
+      }
+    } catch {
+      setResetFeedback({ type: 'info', text: 'Gagal memuat ulang bahan baku.' });
+    } finally {
+      setIsResetting(false);
+    }
+  };
+
+  // Master: Hapus Semua Data Sampel Sekaligus (Pesanan, Menu, Bahan Baku)
+  const handleClearAllSampleData = async () => {
+    setIsResetting(true);
+    try {
+      onUpdateMenu([]);
+      const res = await fetch('/api/reset-all-sample-data', { method: 'POST' });
+      await res.json().catch(() => ({ success: true }));
+      await onRefreshAll();
+      setResetFeedback({
+        type: 'success',
+        text: 'Semua data sampel (pesanan, menu, bahan baku) telah berhasil dihapus total!',
+      });
+    } catch {
+      onUpdateMenu([]);
+      setResetFeedback({ type: 'info', text: 'Data sampel berhasil dibersihkan secara lokal.' });
+    } finally {
+      setIsResetting(false);
+      setShowResetModal(false);
+    }
+  };
+
+  // Handle local image file upload from device / gallery / camera
+  const handleImageFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsCompressingImage(true);
+    try {
+      const compressedDataUrl = await compressImageFile(file, 600, 600, 0.82);
+      setMenuFormImage(compressedDataUrl);
+      setResetFeedback({
+        type: 'success',
+        text: `Foto "${file.name}" berhasil diunggah dari perangkat!`,
+      });
+    } catch (err) {
+      console.error('Gagal membaca gambar:', err);
+      setResetFeedback({
+        type: 'info',
+        text: 'Gagal memproses file foto. Pastikan format gambar valid (JPG/PNG/WEBP).',
+      });
+    } finally {
+      setIsCompressingImage(false);
+      if (e.target) e.target.value = '';
+    }
+  };
 
   // Handle open Menu modal
   const handleOpenAddMenu = () => {
@@ -173,7 +486,8 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
     setMenuFormSensitive(false);
     setMenuFormSensitiveReason('');
     setMenuFormPrepTime(4);
-    setMenuFormImage('https://images.unsplash.com/photo-1517701550927-30cf4ba1dba5?w=500&auto=format&fit=crop&q=80');
+    setMenuFormImage('');
+    setShowUrlInput(false);
     setShowMenuModal(true);
   };
 
@@ -188,6 +502,7 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
     setMenuFormSensitiveReason(item.sensitiveReason || '');
     setMenuFormPrepTime(item.preparationTimeMinutes || 4);
     setMenuFormImage(item.imageUrl || '');
+    setShowUrlInput(Boolean(item.imageUrl && !item.imageUrl.startsWith('data:')));
     setShowMenuModal(true);
   };
 
@@ -253,20 +568,101 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
     }
   };
 
-  // Delete menu item
-  const handleDeleteMenu = async (itemId: string, itemName: string) => {
-    if (!window.confirm(`Yakin ingin menghapus menu "${itemName}" dari daftar?`)) return;
+  // Deletion modal state (replaces window.confirm for iframe reliability)
+  const [deleteConfirmation, setDeleteConfirmation] = useState<{
+    type: 'menu' | 'table' | 'staff';
+    id: string;
+    name: string;
+  } | null>(null);
+  const [isDeletingItem, setIsDeletingItem] = useState(false);
+
+  // Delete menu item trigger
+  const handleDeleteMenu = (itemId: string, itemName: string) => {
+    setDeleteConfirmation({
+      type: 'menu',
+      id: itemId,
+      name: itemName,
+    });
+  };
+
+  // Delete table trigger
+  const handleDeleteTable = (tableId: string, tableName: string) => {
+    setDeleteConfirmation({
+      type: 'table',
+      id: tableId,
+      name: tableName,
+    });
+  };
+
+  // Delete staff trigger
+  const handleDeleteStaff = (staffId: string, staffName: string) => {
+    setDeleteConfirmation({
+      type: 'staff',
+      id: staffId,
+      name: staffName,
+    });
+  };
+
+  // Execute deletion without any window.confirm (works inside iframes)
+  const handleExecuteDelete = async () => {
+    if (!deleteConfirmation) return;
+    setIsDeletingItem(true);
+    const { type, id, name } = deleteConfirmation;
 
     try {
-      const res = await fetch(`/api/menu/${itemId}`, {
-        method: 'DELETE',
-      });
-      const json = await res.json();
-      if (json.success) {
-        onUpdateMenu(menuList.filter(m => m.id !== itemId));
+      if (type === 'menu') {
+        // Optimistic removal from state immediately
+        onUpdateMenu(menuList.filter(m => m.id !== id));
+        try {
+          const res = await fetch(`/api/menu/${id}`, { method: 'DELETE' });
+          await res.json().catch(() => ({ success: true }));
+        } catch (e) {
+          console.warn('Network error during menu delete:', e);
+        }
+        setResetFeedback({
+          type: 'success',
+          text: `Menu "${name}" berhasil dihapus dari daftar katalog!`,
+        });
+      } else if (type === 'table') {
+        onUpdateSettings({
+          ...settings,
+          tables: settings.tables.filter(t => t.id !== id),
+        });
+        try {
+          const res = await fetch(`/api/settings/tables/${id}`, { method: 'DELETE' });
+          await res.json().catch(() => ({ success: true }));
+        } catch (e) {
+          console.warn('Network error during table delete:', e);
+        }
+        setResetFeedback({
+          type: 'success',
+          text: `Meja "${name}" berhasil dihapus dari denah kafe!`,
+        });
+      } else if (type === 'staff') {
+        try {
+          const res = await fetch(`/api/staff/${id}`, { method: 'DELETE' });
+          const json = await res.json().catch(() => ({ success: false }));
+          if (json.success !== false) {
+            onUpdateStaff(staffList.filter(s => s.id !== id));
+            setResetFeedback({
+              type: 'success',
+              text: `Akun karyawan "${name}" berhasil dihapus!`,
+            });
+          } else {
+            setResetFeedback({
+              type: 'info',
+              text: json.error || 'Gagal menghapus karyawan.',
+            });
+          }
+        } catch (e) {
+          console.warn('Network error during staff delete:', e);
+        }
       }
     } catch (err) {
-      console.error('Failed to delete menu', err);
+      console.error('Failed to execute delete', err);
+    } finally {
+      setIsDeletingItem(false);
+      setDeleteConfirmation(null);
     }
   };
 
@@ -354,25 +750,6 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
     }
   };
 
-  // Delete Table
-  const handleDeleteTable = async (tableId: string, tableName: string) => {
-    if (!window.confirm(`Hapus ${tableName} dari denah kafe?`)) return;
-    try {
-      const res = await fetch(`/api/settings/tables/${tableId}`, {
-        method: 'DELETE',
-      });
-      const json = await res.json();
-      if (json.success) {
-        onUpdateSettings({
-          ...settings,
-          tables: settings.tables.filter(t => t.id !== tableId),
-        });
-      }
-    } catch (err) {
-      console.error('Failed to delete table', err);
-    }
-  };
-
   // Staff Save
   const handleSaveStaff = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -402,24 +779,6 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
     }
   };
 
-  // Delete Staff
-  const handleDeleteStaff = async (staffId: string, staffName: string) => {
-    if (!window.confirm(`Hapus akun karyawan "${staffName}"?`)) return;
-    try {
-      const res = await fetch(`/api/staff/${staffId}`, {
-        method: 'DELETE',
-      });
-      const json = await res.json();
-      if (json.success) {
-        onUpdateStaff(staffList.filter(s => s.id !== staffId));
-      } else {
-        alert(json.error || 'Gagal menghapus karyawan');
-      }
-    } catch (err) {
-      console.error('Failed to delete staff', err);
-    }
-  };
-
   // Filtered menu
   const filteredMenuList = menuList.filter(item => {
     const matchesSearch = item.name.toLowerCase().includes(searchMenuQuery.toLowerCase()) ||
@@ -443,6 +802,29 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
           <p className="text-xs sm:text-sm text-stone-300 leading-relaxed">
             Kelola katalog menu makanan/minuman, kontrol ketersediaan meja, atur jam buka & sakelar pre-order, kelola hak akses staf kasir/dapur, dan pantau performa penjualan terlaris.
           </p>
+
+          <div className="pt-1 flex flex-wrap items-center gap-2">
+            {onOpenRoleAccess && (
+              <button
+                id="btn-admin-open-role-access"
+                onClick={onOpenRoleAccess}
+                className="inline-flex items-center space-x-2 px-4 py-2 bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-white rounded-xl text-xs font-extrabold shadow-sm transition-all cursor-pointer border border-amber-500/40"
+              >
+                <Layers className="w-4 h-4 text-amber-200" />
+                <span>Pusat Link Akses Peran & Deploy Kios</span>
+              </button>
+            )}
+
+            <button
+              id="btn-admin-clear-sample-data"
+              onClick={() => setShowResetModal(true)}
+              className="inline-flex items-center space-x-2 px-4 py-2 bg-red-950/70 hover:bg-red-900 text-red-200 hover:text-white rounded-xl text-xs font-bold shadow-sm transition-all cursor-pointer border border-red-700/60"
+              title="Hapus data pesanan sample dan bersihkan transaksi"
+            >
+              <Trash2 className="w-3.5 h-3.5 text-red-400" />
+              <span>Bersihkan Data Sample</span>
+            </button>
+          </div>
         </div>
 
         {/* Current Active Staff Badge & Fast Switcher */}
@@ -469,6 +851,26 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Feedback banner for sample data reset */}
+      {resetFeedback && (
+        <div className={`p-4 rounded-2xl border text-xs font-bold flex items-center justify-between shadow-xs ${
+          resetFeedback.type === 'success'
+            ? 'bg-emerald-50 border-emerald-300 text-emerald-900'
+            : 'bg-amber-50 border-amber-300 text-amber-900'
+        }`}>
+          <div className="flex items-center space-x-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{resetFeedback.text}</span>
+          </div>
+          <button
+            onClick={() => setResetFeedback(null)}
+            className="text-stone-400 hover:text-stone-700 p-1 rounded-md"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* Admin Sub-Navigation Tabs */}
       <div className="flex items-center space-x-2 border-b border-stone-200 pb-2 overflow-x-auto">
@@ -523,6 +925,20 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
           <BarChart3 className="w-4 h-4" />
           <span>Laporan & Menu Terlaris</span>
         </button>
+
+        <button
+          id="tab-admin-supabase"
+          onClick={() => setActiveSubTab('supabase_db')}
+          className={`flex items-center space-x-2 px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-bold transition-all whitespace-nowrap ${
+            activeSubTab === 'supabase_db'
+              ? 'bg-emerald-600 text-white shadow-sm'
+              : 'bg-white text-emerald-800 hover:bg-emerald-50 border border-emerald-300'
+          }`}
+        >
+          <Database className="w-4 h-4 text-emerald-500" />
+          <span>Database Supabase</span>
+          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+        </button>
       </div>
 
       {/* ================= SECTION 1: KELOLA MENU ================= */}
@@ -560,15 +976,31 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
               </div>
             </div>
 
-            {/* Button Tambah Menu Baru */}
-            <button
-              id="btn-add-new-menu"
-              onClick={handleOpenAddMenu}
-              className="flex items-center justify-center space-x-2 bg-amber-600 hover:bg-amber-700 text-white font-extrabold px-4 py-2.5 rounded-xl text-xs transition-colors shadow-sm shrink-0"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Tambah Menu Baru</span>
-            </button>
+            {/* Quick Actions */}
+            <div className="flex items-center space-x-2 shrink-0">
+              {menuList.length > 0 && (
+                <button
+                  id="btn-admin-empty-menu"
+                  onClick={handleClearMenu}
+                  disabled={isResetting}
+                  className="flex items-center space-x-1.5 px-3 py-2.5 rounded-xl border border-red-200 bg-red-50 hover:bg-red-100 text-red-700 font-bold text-xs transition-colors cursor-pointer"
+                  title="Hapus semua menu dan mulai dari katalog kosong"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Kosongkan Menu ({menuList.length})</span>
+                </button>
+              )}
+
+              {/* Button Tambah Menu Baru */}
+              <button
+                id="btn-add-new-menu"
+                onClick={handleOpenAddMenu}
+                className="flex items-center justify-center space-x-2 bg-amber-600 hover:bg-amber-700 text-white font-extrabold px-4 py-2.5 rounded-xl text-xs transition-colors shadow-sm shrink-0 cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Tambah Menu Baru</span>
+              </button>
+            </div>
           </div>
 
           {/* Menu Table / Cards Grid */}
@@ -592,9 +1024,10 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
 
                       {/* Stock availability toggle switch */}
                       <button
+                        id={`btn-toggle-stock-${item.id}`}
                         onClick={() => handleToggleMenuStock(item.id)}
                         title="Klik untuk mengubah status ketersediaan stok"
-                        className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-xs font-bold transition-all ${
+                        className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-xs font-bold transition-all cursor-pointer shadow-xs active:scale-95 ${
                           isAvailable
                             ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200 border border-emerald-300'
                             : 'bg-red-100 text-red-800 hover:bg-red-200 border border-red-300'
@@ -607,14 +1040,20 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
 
                     {/* Image & Title */}
                     <div className="flex space-x-3 items-start">
-                      <img 
-                        src={item.imageUrl} 
-                        alt={item.name} 
-                        referrerPolicy="no-referrer"
-                        className="w-16 h-16 rounded-xl object-cover border border-stone-200 shrink-0 bg-stone-100" 
-                      />
-                      <div className="space-y-1">
-                        <h3 className="font-extrabold text-stone-900 text-sm leading-tight">
+                      {item.imageUrl ? (
+                        <img 
+                          src={item.imageUrl} 
+                          alt={item.name} 
+                          referrerPolicy="no-referrer"
+                          className="w-16 h-16 rounded-xl object-cover border border-stone-200 shrink-0 bg-stone-100 shadow-2xs" 
+                        />
+                      ) : (
+                        <div className="w-16 h-16 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center font-bold text-xs shrink-0 border border-amber-200 shadow-2xs">
+                          <UtensilsCrossed className="w-6 h-6 text-amber-600" />
+                        </div>
+                      )}
+                      <div className="space-y-1 min-w-0 flex-1">
+                        <h3 className="font-extrabold text-stone-900 text-sm leading-tight truncate">
                           {item.name}
                         </h3>
                         <div className="text-amber-800 font-bold font-mono text-xs">
@@ -647,15 +1086,17 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
                   {/* Actions: Edit & Hapus */}
                   <div className="pt-2 border-t border-stone-100 flex items-center justify-end space-x-2">
                     <button
+                      id={`btn-edit-menu-${item.id}`}
                       onClick={() => handleOpenEditMenu(item)}
-                      className="flex items-center space-x-1 text-xs font-bold text-stone-700 hover:text-stone-900 bg-stone-100 hover:bg-stone-200 px-3 py-1.5 rounded-lg transition-colors"
+                      className="flex items-center space-x-1 text-xs font-bold text-stone-700 hover:text-stone-900 bg-stone-100 hover:bg-stone-200 px-3 py-1.5 rounded-lg transition-colors cursor-pointer active:scale-95 shadow-2xs"
                     >
                       <Edit3 className="w-3.5 h-3.5 text-stone-500" />
                       <span>Edit</span>
                     </button>
                     <button
+                      id={`btn-delete-menu-${item.id}`}
                       onClick={() => handleDeleteMenu(item.id, item.name)}
-                      className="flex items-center space-x-1 text-xs font-bold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-lg transition-colors"
+                      className="flex items-center space-x-1 text-xs font-bold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 border border-red-200/60 px-3 py-1.5 rounded-lg transition-colors cursor-pointer active:scale-95 shadow-2xs"
                     >
                       <Trash2 className="w-3.5 h-3.5 text-red-500" />
                       <span>Hapus</span>
@@ -667,10 +1108,41 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
           </div>
 
           {filteredMenuList.length === 0 && (
-            <div className="bg-white rounded-2xl p-12 text-center text-stone-500 text-sm border border-stone-200 space-y-2">
-              <UtensilsCrossed className="w-8 h-8 text-stone-300 mx-auto" />
-              <p className="font-bold">Tidak ada menu yang sesuai dengan pencarian atau filter.</p>
-              <p className="text-xs text-stone-400">Tekan tombol "Tambah Menu Baru" untuk memasukkan hidangan kopi atau makanan baru.</p>
+            <div className="bg-white rounded-3xl p-10 text-center text-stone-500 text-sm border border-stone-200 space-y-4 shadow-xs">
+              <div className="w-16 h-16 rounded-3xl bg-amber-100 text-amber-700 flex items-center justify-center mx-auto shadow-inner">
+                <UtensilsCrossed className="w-8 h-8" />
+              </div>
+              <div className="space-y-1">
+                <p className="font-extrabold text-stone-900 text-base">
+                  {menuList.length === 0 ? 'Katalog Menu Kafe Anda Masih Kosong' : 'Tidak Ada Menu yang Sesuai'}
+                </p>
+                <p className="text-xs text-stone-500 max-w-md mx-auto">
+                  {menuList.length === 0
+                    ? 'Aplikasi siap digunakan. Tambahkan hidangan atau racikan kopi pertama Anda sekarang!'
+                    : 'Tidak ada menu yang sesuai dengan kata kunci pencarian atau filter kategori yang dipilih.'}
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
+                <button
+                  id="btn-empty-add-first-menu"
+                  onClick={handleOpenAddMenu}
+                  className="px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-extrabold text-xs shadow-sm flex items-center space-x-1.5 cursor-pointer transition-colors"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Tambah Menu Baru Sekarang</span>
+                </button>
+                {menuList.length === 0 && (
+                  <button
+                    id="btn-empty-load-template-menu"
+                    onClick={handleResetMenu}
+                    disabled={isResetting}
+                    className="px-4 py-2.5 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-700 font-bold text-xs flex items-center space-x-1.5 cursor-pointer transition-colors"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                    <span>Muat Contoh Menu Template</span>
+                  </button>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -1080,8 +1552,9 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
 
                       <div className="flex justify-end pt-1">
                         <button
+                          id={`btn-delete-table-${table.id}`}
                           onClick={() => handleDeleteTable(table.id, table.name)}
-                          className="text-[10px] text-red-500 hover:text-red-700 font-semibold"
+                          className="text-[10px] text-red-500 hover:text-red-700 font-semibold cursor-pointer hover:underline"
                         >
                           Hapus Meja
                         </button>
@@ -1261,8 +1734,9 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
                       <td className="py-3 px-4 text-right">
                         {staff.role !== 'admin' && (
                           <button
+                            id={`btn-delete-staff-${staff.id}`}
                             onClick={() => handleDeleteStaff(staff.id, staff.name)}
-                            className="text-red-500 hover:text-red-700 font-bold hover:underline"
+                            className="text-red-500 hover:text-red-700 font-bold hover:underline cursor-pointer"
                           >
                             Hapus
                           </button>
@@ -1464,6 +1938,342 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
         </div>
       )}
 
+      {/* ================= SECTION 5: DATABASE SUPABASE ================= */}
+      {activeSubTab === 'supabase_db' && (
+        <div className="space-y-6">
+          {/* Supabase Status Banner */}
+          <div className="bg-gradient-to-br from-stone-900 via-stone-850 to-emerald-950 rounded-3xl p-6 sm:p-8 text-white shadow-xl border border-emerald-900/40 relative overflow-hidden">
+            <div className="absolute right-0 top-0 translate-x-12 -translate-y-12 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
+            
+            <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6 relative z-10">
+              <div className="space-y-3 max-w-2xl">
+                <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full text-xs font-extrabold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                  <Database className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Koneksi Supabase Cloud Database</span>
+                </div>
+                <h2 className="text-xl sm:text-2xl font-black tracking-tight text-white flex items-center space-x-2">
+                  <span>Supabase PostgreSQL Integration</span>
+                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-600 text-white shadow-xs">
+                    Aktif & Terhubung
+                  </span>
+                </h2>
+                <p className="text-xs sm:text-sm text-stone-300 leading-relaxed">
+                  Aplikasi KafeKu terhubung langsung ke project Supabase Anda. Semua perubahan menu, pesanan pelanggan, stok bahan baku, denah meja, dan akun karyawan dapat disimpan secara permanen di cloud PostgreSQL.
+                </p>
+
+                {/* Connection Credentials Badge */}
+                <div className="flex flex-wrap items-center gap-2 pt-1 text-xs">
+                  <div className="flex items-center space-x-2 bg-stone-800/80 px-3 py-1.5 rounded-xl border border-stone-700 font-mono">
+                    <span className="text-stone-400">URL:</span>
+                    <span className="text-emerald-400 font-bold text-[11px]">
+                      {supabaseStatus?.url || 'https://yuyrqhqngjfikkhfwern.supabase.co'}
+                    </span>
+                    <button
+                      onClick={handleCopyUrl}
+                      className="text-stone-400 hover:text-white p-1 rounded-md transition-colors"
+                      title="Salin URL"
+                    >
+                      {copiedUrl ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                    </button>
+                  </div>
+
+                  <div className="flex items-center space-x-2 bg-stone-800/80 px-3 py-1.5 rounded-xl border border-stone-700 font-mono text-[11px]">
+                    <span className="text-stone-400">Key:</span>
+                    <span className="text-stone-300">eyJhbGciOiJIUz...4cHf5FmGQ48</span>
+                    <span className="px-1.5 py-0.5 rounded-md bg-stone-700 text-stone-300 text-[10px] font-semibold">anon public</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Action Buttons in Banner */}
+              <div className="flex flex-wrap lg:flex-col gap-2.5 shrink-0 w-full sm:w-auto">
+                <button
+                  onClick={() => fetchSupabaseStatus(true)}
+                  disabled={isLoadingSupabase}
+                  className="flex-1 sm:flex-initial flex items-center justify-center space-x-2 px-4 py-2.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-200 border border-stone-600 text-xs font-bold transition-all shadow-sm cursor-pointer disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isLoadingSupabase ? 'animate-spin text-emerald-400' : ''}`} />
+                  <span>{isLoadingSupabase ? 'Memeriksa...' : 'Cek Status Tabel'}</span>
+                </button>
+
+                <button
+                  onClick={handleSeedSupabase}
+                  disabled={isSeedingSupabase}
+                  className="flex-1 sm:flex-initial flex items-center justify-center space-x-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-extrabold transition-all shadow-md cursor-pointer disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isSeedingSupabase ? 'animate-spin' : ''}`} />
+                  <span>{isSeedingSupabase ? 'Menyinkronkan...' : 'Sinkronkan / Seed Data Awal'}</span>
+                </button>
+
+                <a
+                  href="https://supabase.com/dashboard/project/yuyrqhqngjfikkhfwern/sql/new"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex-1 sm:flex-initial flex items-center justify-center space-x-2 px-4 py-2.5 rounded-xl bg-stone-700 hover:bg-stone-600 text-white text-xs font-bold transition-all shadow-sm cursor-pointer"
+                >
+                  <ExternalLink className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Buka Supabase SQL Editor</span>
+                </a>
+              </div>
+            </div>
+          </div>
+
+          {/* Feedback message banner if any */}
+          {seedMessage && (
+            <div className={`p-4 rounded-2xl border text-xs font-bold flex items-center justify-between animate-in fade-in duration-200 ${
+              seedMessage.type === 'success'
+                ? 'bg-emerald-50 border-emerald-300 text-emerald-900'
+                : 'bg-red-50 border-red-300 text-red-900'
+            }`}>
+              <div className="flex items-center space-x-2">
+                {seedMessage.type === 'success' ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                ) : (
+                  <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+                )}
+                <span>{seedMessage.text}</span>
+              </div>
+              <button
+                onClick={() => setSeedMessage(null)}
+                className="text-stone-400 hover:text-stone-700 p-1 rounded-md"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+
+          {/* Table Readiness Status Grid */}
+          <div className="bg-white rounded-3xl p-6 border border-stone-200 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-stone-100 pb-4">
+              <div>
+                <h3 className="text-base font-extrabold text-stone-900 flex items-center space-x-2">
+                  <Database className="w-4 h-4 text-emerald-600" />
+                  <span>Status Tabel Database KafeKu</span>
+                </h3>
+                <p className="text-xs text-stone-500">
+                  Berikut adalah status ketersediaan tabel di project Supabase <span className="font-mono font-bold text-stone-700">yuyrqhqngjfikkhfwern</span>
+                </p>
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <span className="text-xs text-stone-500 font-medium">Status Keseluruhan:</span>
+                {supabaseStatus?.allReady ? (
+                  <span className="px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 font-extrabold text-xs flex items-center space-x-1">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Semua Tabel Siap</span>
+                  </span>
+                ) : (
+                  <span className="px-2.5 py-1 rounded-full bg-amber-100 text-amber-900 font-extrabold text-xs flex items-center space-x-1">
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                    <span>Menunggu Eksekusi SQL di Supabase</span>
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Table Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+              {/* 1. menu */}
+              <div className="p-4 rounded-2xl border border-stone-200 bg-stone-50/50 hover:bg-stone-50 transition-colors space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-mono font-bold text-xs text-stone-900">public.menu</span>
+                  {supabaseStatus?.tables?.menu ? (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-100 text-emerald-800">
+                      ✓ Terhubung
+                    </span>
+                  ) : (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
+                      Perlu SQL
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] text-stone-600">
+                  Menyimpan katalog menu makanan & kopi, harga, foto, kategori, dan resep bahan.
+                </p>
+                <div className="text-[10px] text-stone-400 font-mono">
+                  Data Lokal: {menuList.length} menu
+                </div>
+              </div>
+
+              {/* 2. inventory */}
+              <div className="p-4 rounded-2xl border border-stone-200 bg-stone-50/50 hover:bg-stone-50 transition-colors space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-mono font-bold text-xs text-stone-900">public.inventory</span>
+                  {supabaseStatus?.tables?.inventory ? (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-100 text-emerald-800">
+                      ✓ Terhubung
+                    </span>
+                  ) : (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
+                      Perlu SQL
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] text-stone-600">
+                  Menyimpan stok bahan baku kopi (biji kopi, susu segar, sirup, cup takeaway).
+                </p>
+                <div className="text-[10px] text-stone-400 font-mono">
+                  Pengurangan stok real-time saat pesanan dibuat
+                </div>
+              </div>
+
+              {/* 3. orders */}
+              <div className="p-4 rounded-2xl border border-stone-200 bg-stone-50/50 hover:bg-stone-50 transition-colors space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-mono font-bold text-xs text-stone-900">public.orders</span>
+                  {supabaseStatus?.tables?.orders ? (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-100 text-emerald-800">
+                      ✓ Terhubung
+                    </span>
+                  ) : (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
+                      Perlu SQL
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] text-stone-600">
+                  Seluruh transaksi pre-order, QRIS, kasir POS tunai, status dapur & takeaway.
+                </p>
+                <div className="text-[10px] text-stone-400 font-mono">
+                  Sinkronisasi live dengan layar dapur (KDS)
+                </div>
+              </div>
+
+              {/* 4. cafe_settings */}
+              <div className="p-4 rounded-2xl border border-stone-200 bg-stone-50/50 hover:bg-stone-50 transition-colors space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-mono font-bold text-xs text-stone-900">public.cafe_settings</span>
+                  {supabaseStatus?.tables?.cafe_settings ? (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-100 text-emerald-800">
+                      ✓ Terhubung
+                    </span>
+                  ) : (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
+                      Perlu SQL
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] text-stone-600">
+                  Konfigurasi nama kafe, jam operasional buka/tutup, suara bel, dan daftar meja.
+                </p>
+                <div className="text-[10px] text-stone-400 font-mono">
+                  {settings.tables.length} meja kafe terdaftar
+                </div>
+              </div>
+
+              {/* 5. staff */}
+              <div className="p-4 rounded-2xl border border-stone-200 bg-stone-50/50 hover:bg-stone-50 transition-colors space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-mono font-bold text-xs text-stone-900">public.staff</span>
+                  {supabaseStatus?.tables?.staff ? (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-100 text-emerald-800">
+                      ✓ Terhubung
+                    </span>
+                  ) : (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
+                      Perlu SQL
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] text-stone-600">
+                  Akun staf kasir, koki dapur, owner, dan hak akses PIN operasional.
+                </p>
+                <div className="text-[10px] text-stone-400 font-mono">
+                  {staffList.length} akun staf terdaftar
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Setup Guide: 3 Easy Steps */}
+          <div className="bg-stone-900 rounded-3xl p-6 sm:p-7 text-white space-y-4 border border-stone-800">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <div className="w-8 h-8 rounded-xl bg-amber-600 flex items-center justify-center font-bold text-white text-xs">
+                  SQL
+                </div>
+                <div>
+                  <h3 className="text-sm font-extrabold text-white">Panduan Membuat Tabel di Supabase (1 Kali Saja)</h3>
+                  <p className="text-xs text-stone-400">Jalankan script di bawah ini pada SQL Editor Supabase</p>
+                </div>
+              </div>
+
+              <button
+                onClick={handleCopySql}
+                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold shadow-sm transition-all cursor-pointer"
+              >
+                {copiedSql ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-white" />
+                    <span>Tersalin ke Clipboard!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5" />
+                    <span>Salin Script SQL</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Steps List */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2 text-xs">
+              <div className="p-3.5 rounded-2xl bg-stone-800/80 border border-stone-700/80 space-y-1.5">
+                <div className="flex items-center space-x-2">
+                  <span className="w-5 h-5 rounded-full bg-amber-500 text-stone-950 font-black text-[11px] flex items-center justify-center">1</span>
+                  <span className="font-bold text-stone-200">Salin Script SQL</span>
+                </div>
+                <p className="text-stone-400 text-[11px] leading-relaxed">
+                  Klik tombol <strong>"Salin Script SQL"</strong> di pojok kanan atas atau di bawah. Script sudah mencakup tabel Menu, Stok, Pesanan, Settings, dan Staff.
+                </p>
+              </div>
+
+              <div className="p-3.5 rounded-2xl bg-stone-800/80 border border-stone-700/80 space-y-1.5">
+                <div className="flex items-center space-x-2">
+                  <span className="w-5 h-5 rounded-full bg-amber-500 text-stone-950 font-black text-[11px] flex items-center justify-center">2</span>
+                  <span className="font-bold text-stone-200">Buka SQL Editor Supabase</span>
+                </div>
+                <p className="text-stone-400 text-[11px] leading-relaxed">
+                  Buka tab baru: <a href="https://supabase.com/dashboard/project/yuyrqhqngjfikkhfwern/sql/new" target="_blank" rel="noreferrer" className="text-emerald-400 underline font-mono">supabase.com/.../sql/new</a> lalu tempel (Paste) script dan klik <strong>RUN</strong>.
+                </p>
+              </div>
+
+              <div className="p-3.5 rounded-2xl bg-stone-800/80 border border-stone-700/80 space-y-1.5">
+                <div className="flex items-center space-x-2">
+                  <span className="w-5 h-5 rounded-full bg-amber-500 text-stone-950 font-black text-[11px] flex items-center justify-center">3</span>
+                  <span className="font-bold text-stone-200">Klik "Sinkronkan Data Awal"</span>
+                </div>
+                <p className="text-stone-400 text-[11px] leading-relaxed">
+                  Setelah tabel dibuat, klik tombol <strong>"Sinkronkan / Seed Data Awal"</strong> di atas. Seluruh data KafeKu langsung terisi ke database Supabase Anda!
+                </p>
+              </div>
+            </div>
+
+            {/* Code Box */}
+            <div className="relative pt-2">
+              <div className="flex items-center justify-between bg-stone-950 px-4 py-2 rounded-t-2xl border-x border-t border-stone-800 text-[11px] text-stone-400">
+                <span className="font-mono text-emerald-400">supabase-schema.sql</span>
+                <button
+                  onClick={handleCopySql}
+                  className="hover:text-white flex items-center space-x-1 cursor-pointer"
+                >
+                  <Copy className="w-3 h-3" />
+                  <span>{copiedSql ? 'Tersalin!' : 'Salin'}</span>
+                </button>
+              </div>
+              <pre className="p-4 bg-stone-950/90 rounded-b-2xl border border-stone-800 text-stone-300 font-mono text-[11px] overflow-x-auto max-h-72 leading-relaxed">
+                <code>{supabaseStatus?.schemaSql || `-- Script SQL Schema KafeKu Supabase
+CREATE TABLE IF NOT EXISTS public.menu ( ... );
+CREATE TABLE IF NOT EXISTS public.inventory ( ... );
+CREATE TABLE IF NOT EXISTS public.orders ( ... );
+CREATE TABLE IF NOT EXISTS public.cafe_settings ( ... );
+CREATE TABLE IF NOT EXISTS public.staff ( ... );`}</code>
+              </pre>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ================= MODAL: TAMBAH / EDIT MENU ================= */}
       {showMenuModal && (
         <div className="fixed inset-0 z-50 bg-stone-950/75 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
@@ -1591,64 +2401,183 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
                 )}
               </div>
 
-              {/* URL Gambar */}
-              <div>
-                <label className="block text-stone-700 font-bold mb-1">URL Gambar Menu</label>
+              {/* Foto / Gambar Menu (Bisa Unggah Langsung Tanpa URL) */}
+              <div className="space-y-3 p-3.5 bg-stone-50 rounded-2xl border border-stone-200">
+                <div className="flex items-center justify-between">
+                  <label className="font-extrabold text-stone-900 flex items-center space-x-1.5 text-xs">
+                    <Camera className="w-4 h-4 text-amber-700" />
+                    <span>Foto / Gambar Menu</span>
+                  </label>
+                  <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 border border-emerald-200 px-2 py-0.5 rounded-full flex items-center space-x-1">
+                    <Check className="w-3 h-3" />
+                    <span>Bisa Tanpa URL</span>
+                  </span>
+                </div>
+
+                {/* Hidden input file for picking from device/camera */}
                 <input
-                  type="url"
-                  value={menuFormImage}
-                  onChange={e => setMenuFormImage(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-500 text-xs font-mono"
+                  ref={fileInputRef}
+                  id="menu-form-file-picker"
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={handleImageFileSelect}
                 />
-                {/* Quick image preset chips */}
-                <div className="flex items-center space-x-1.5 pt-1.5 overflow-x-auto text-[10px]">
-                  <span className="text-stone-400">Pilih cepat:</span>
+
+                {/* Pratinjau atau Tombol Unggah File */}
+                {menuFormImage ? (
+                  <div className="bg-white rounded-2xl p-3 border border-stone-200 flex items-center space-x-3 shadow-xs">
+                    <img
+                      src={menuFormImage}
+                      alt="Pratinjau Menu"
+                      className="w-16 h-16 rounded-xl object-cover border border-stone-200 shrink-0 bg-stone-100 shadow-2xs"
+                    />
+                    <div className="flex-1 min-w-0 space-y-1">
+                      <div className="flex items-center space-x-1 text-emerald-700 text-xs font-extrabold">
+                        <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                        <span>Foto Berhasil Terpasang</span>
+                      </div>
+                      <p className="text-[11px] text-stone-500 truncate">
+                        {menuFormImage.startsWith('data:') ? 'Foto dari perangkat Anda (tersimpan lokal)' : 'Foto estetik pilihan'}
+                      </p>
+                      <div className="flex items-center space-x-2 pt-1">
+                        <button
+                          type="button"
+                          id="btn-change-menu-image"
+                          onClick={() => fileInputRef.current?.click()}
+                          disabled={isCompressingImage}
+                          className="px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 text-[11px] font-bold border border-amber-200 flex items-center space-x-1 cursor-pointer transition-colors"
+                        >
+                          <Upload className="w-3 h-3" />
+                          <span>Ganti Foto</span>
+                        </button>
+                        <button
+                          type="button"
+                          id="btn-remove-menu-image"
+                          onClick={() => setMenuFormImage('')}
+                          className="px-2.5 py-1 rounded-lg bg-red-50 hover:bg-red-100 text-red-700 text-[11px] font-bold border border-red-200 flex items-center space-x-1 cursor-pointer transition-colors"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                          <span>Hapus Foto</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
                   <button
                     type="button"
-                    onClick={() => setMenuFormImage('https://images.unsplash.com/photo-1517701550927-30cf4ba1dba5?w=500&auto=format&fit=crop&q=80')}
-                    className="px-2 py-0.5 rounded bg-stone-100 hover:bg-stone-200 text-stone-700"
+                    id="btn-upload-menu-image-card"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isCompressingImage}
+                    className="w-full border-2 border-dashed border-amber-300 hover:border-amber-500 bg-amber-50/60 hover:bg-amber-50 rounded-2xl p-4 text-center transition-all cursor-pointer group flex flex-col items-center justify-center space-y-1.5 active:scale-[0.99]"
                   >
-                    Kopi Es
+                    <div className="w-11 h-11 rounded-2xl bg-amber-100 group-hover:bg-amber-200 text-amber-700 flex items-center justify-center transition-colors shadow-2xs">
+                      {isCompressingImage ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Upload className="w-5 h-5" />}
+                    </div>
+                    <div className="font-extrabold text-stone-900 text-xs">
+                      {isCompressingImage ? 'Sedang memproses gambar...' : 'Klik untuk Unggah Foto dari HP / Komputer'}
+                    </div>
+                    <p className="text-[11px] text-stone-500 max-w-sm">
+                      Bisa langsung ambil dari Galeri atau Kamera. Foto otomatis dikompres ringan tanpa perlu mencari link URL.
+                    </p>
                   </button>
+                )}
+
+                {/* Galeri Cepat Foto Estetik Sesuai Kategori */}
+                <div className="space-y-1.5 pt-1">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="text-stone-700 font-bold flex items-center space-x-1">
+                      <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                      <span>Atau pilih cepat foto estetik ({menuFormCategory}):</span>
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    {MENU_IMAGE_PRESETS[menuFormCategory]?.map((preset, idx) => {
+                      const isSelected = menuFormImage === preset.url;
+                      return (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => setMenuFormImage(preset.url)}
+                          className={`p-1.5 rounded-xl border text-left transition-all flex items-center space-x-2 cursor-pointer ${
+                            isSelected
+                              ? 'border-amber-600 bg-amber-50 ring-2 ring-amber-500/50 shadow-xs'
+                              : 'border-stone-200 bg-white hover:border-amber-300 hover:bg-stone-50 shadow-2xs'
+                          }`}
+                        >
+                          <img
+                            src={preset.url}
+                            alt={preset.title}
+                            className="w-8 h-8 rounded-lg object-cover shrink-0 bg-stone-100"
+                          />
+                          <span className="text-[10px] font-bold text-stone-800 truncate leading-tight">
+                            {preset.title}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Accordion: Opsi Lanjutan Input URL */}
+                <div className="pt-1 border-t border-stone-200/60">
                   <button
                     type="button"
-                    onClick={() => setMenuFormImage('https://images.unsplash.com/photo-1534778101976-62847782c213?w=500&auto=format&fit=crop&q=80')}
-                    className="px-2 py-0.5 rounded bg-stone-100 hover:bg-stone-200 text-stone-700"
+                    onClick={() => setShowUrlInput(!showUrlInput)}
+                    className="text-[11px] font-bold text-stone-500 hover:text-stone-800 flex items-center space-x-1 cursor-pointer"
                   >
-                    Cappuccino Panas
+                    <span>{showUrlInput ? '▼ Sembunyikan input URL eksternal' : '▶ Atau masukkan URL eksternal secara manual (opsional)'}</span>
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setMenuFormImage('https://images.unsplash.com/photo-1603133872878-684f208fb84b?w=500&auto=format&fit=crop&q=80')}
-                    className="px-2 py-0.5 rounded bg-stone-100 hover:bg-stone-200 text-stone-700"
-                  >
-                    Makanan Nasi
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setMenuFormImage('https://images.unsplash.com/photo-1555507036-ab1f4038808a?w=500&auto=format&fit=crop&q=80')}
-                    className="px-2 py-0.5 rounded bg-stone-100 hover:bg-stone-200 text-stone-700"
-                  >
-                    Pastry / Roti
-                  </button>
+                  {showUrlInput && (
+                    <div className="pt-2">
+                      <input
+                        type="url"
+                        placeholder="https://..."
+                        value={menuFormImage.startsWith('data:') ? '' : menuFormImage}
+                        onChange={e => setMenuFormImage(e.target.value)}
+                        className="w-full px-3 py-2 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-500 text-xs font-mono bg-white"
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
 
               {/* Submit Buttons */}
-              <div className="flex items-center justify-end space-x-2 pt-3 border-t border-stone-100">
-                <button
-                  type="button"
-                  onClick={() => setShowMenuModal(false)}
-                  className="px-4 py-2 rounded-xl text-stone-600 hover:bg-stone-100 font-bold"
-                >
-                  Batal
-                </button>
-                <button
-                  type="submit"
-                  className="bg-amber-600 hover:bg-amber-700 text-white font-extrabold px-5 py-2 rounded-xl shadow-sm transition-colors"
-                >
-                  {editingMenuItem ? 'Simpan Perubahan' : 'Tambah Menu'}
-                </button>
+              <div className="flex items-center justify-between pt-3 border-t border-stone-100 gap-2">
+                {editingMenuItem ? (
+                  <button
+                    type="button"
+                    id="btn-delete-menu-from-modal"
+                    onClick={() => {
+                      const itemToDelete = editingMenuItem;
+                      setShowMenuModal(false);
+                      handleDeleteMenu(itemToDelete.id, itemToDelete.name);
+                    }}
+                    className="px-3.5 py-2 rounded-xl bg-red-50 hover:bg-red-100 text-red-600 hover:text-red-700 font-extrabold text-xs border border-red-200 transition-colors flex items-center space-x-1.5 cursor-pointer shadow-2xs active:scale-95"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 text-red-500" />
+                    <span>Hapus Menu Ini</span>
+                  </button>
+                ) : (
+                  <div />
+                )}
+
+                <div className="flex items-center space-x-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowMenuModal(false)}
+                    className="px-4 py-2 rounded-xl text-stone-600 hover:bg-stone-100 font-bold cursor-pointer"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    type="submit"
+                    id="btn-submit-menu-modal"
+                    className="bg-amber-600 hover:bg-amber-700 text-white font-extrabold px-5 py-2 rounded-xl shadow-sm transition-colors cursor-pointer"
+                  >
+                    {editingMenuItem ? 'Simpan Perubahan' : 'Tambah Menu'}
+                  </button>
+                </div>
               </div>
             </form>
           </div>
@@ -1806,6 +2735,213 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ================= MODAL: BERSIHKAN DATA SAMPLE ================= */}
+      {showResetModal && (
+        <div className="fixed inset-0 z-50 bg-stone-950/80 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 space-y-5 shadow-2xl border border-stone-200 animate-in fade-in zoom-in-95 duration-200 my-8">
+            <div className="flex items-center justify-between border-b border-stone-100 pb-3">
+              <div className="flex items-center space-x-2">
+                <div className="w-8 h-8 rounded-xl bg-red-100 text-red-600 flex items-center justify-center font-bold">
+                  <Trash2 className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-stone-900">Bersihkan Data Sample KafeKu</h3>
+                  <p className="text-xs text-stone-500">Hapus data demo/contoh agar sistem bersih untuk operasional kafe Anda</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setShowResetModal(false)}
+                className="text-stone-400 hover:text-stone-700 p-1.5 rounded-full hover:bg-stone-100"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4 text-xs">
+              {/* Master Option: Hapus SEMUA Data Sampel Sekaligus */}
+              <div className="p-4 rounded-2xl border-2 border-red-500 bg-red-950 text-white space-y-2 shadow-md">
+                <div className="flex items-center justify-between">
+                  <div className="font-extrabold text-white flex items-center space-x-2 text-sm">
+                    <Trash2 className="w-4 h-4 text-red-400" />
+                    <span>Hapus SEMUA Data Sampel Sekaligus</span>
+                  </div>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-red-500 text-white uppercase tracking-wider">
+                    Total Reset
+                  </span>
+                </div>
+                <p className="text-red-200 text-[11px] leading-relaxed">
+                  Menghapus semua pesanan & antrean, mengosongkan seluruh menu sampel, mengosongkan bahan baku, dan mereset status meja kembali bersih untuk awal penggunaan kafe Anda.
+                </p>
+                <div className="pt-1">
+                  <button
+                    id="btn-admin-clear-all-samples"
+                    onClick={handleClearAllSampleData}
+                    disabled={isResetting}
+                    className="w-full py-2.5 px-4 rounded-xl bg-red-600 hover:bg-red-500 text-white font-black text-xs shadow-md transition-colors flex items-center justify-center space-x-2 cursor-pointer disabled:opacity-50"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    <span>{isResetting ? 'Sedang Membersihkan Total...' : 'Bersihkan Semua Data Sample Sekarang'}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Option 1: Hapus Semua Pesanan Sample */}
+              <div className="p-4 rounded-2xl border border-red-200 bg-red-50/50 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="font-extrabold text-stone-900 flex items-center space-x-2">
+                    <span className="w-2 h-2 rounded-full bg-red-500"></span>
+                    <span>1. Hapus Semua Pesanan Sampel (Direkomendasikan)</span>
+                  </div>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-800">
+                    Reset Transaksi
+                  </span>
+                </div>
+                <p className="text-stone-600 text-[11px] leading-relaxed">
+                  Menghapus semua antrean di layar <strong>Dapur (KDS)</strong>, riwayat transaksi di <strong>Kasir (POS)</strong>, mereset omzet ke <strong>Rp 0</strong>, dan mengosongkan status seluruh meja kembali menjadi <em>Tersedia</em>.
+                </p>
+                <div className="pt-1">
+                  <button
+                    onClick={async () => {
+                      await handleClearOrders();
+                      setShowResetModal(false);
+                    }}
+                    disabled={isResetting}
+                    className="w-full py-2 px-3 rounded-xl bg-red-600 hover:bg-red-700 text-white font-extrabold text-xs shadow-xs transition-colors flex items-center justify-center space-x-1.5 cursor-pointer disabled:opacity-50"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>{isResetting ? 'Sedang Menghapus...' : 'Hapus Semua Pesanan Sampel Sekarang'}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Option 2: Kelola Menu */}
+              <div className="p-4 rounded-2xl border border-stone-200 bg-stone-50/60 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="font-extrabold text-stone-900 flex items-center space-x-2">
+                    <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                    <span>2. Kelola Katalog Menu Makanan & Minuman</span>
+                  </div>
+                  <span className="text-stone-500 font-mono text-[11px]">{menuList.length} menu aktif</span>
+                </div>
+                <p className="text-stone-600 text-[11px] leading-relaxed">
+                  Kosongkan menu jika Anda ingin mendaftarkan menu kafe Anda sendiri dari nol, atau muat ulang menu template standar.
+                </p>
+                <div className="flex items-center space-x-2 pt-1">
+                  <button
+                    onClick={async () => {
+                      await handleClearMenu();
+                      setShowResetModal(false);
+                    }}
+                    disabled={isResetting}
+                    className="flex-1 py-1.5 px-2.5 rounded-xl bg-white border border-red-300 text-red-700 hover:bg-red-50 font-bold text-xs transition-colors cursor-pointer"
+                  >
+                    Kosongkan Menu ({menuList.length})
+                  </button>
+                  <button
+                    onClick={async () => {
+                      await handleResetMenu();
+                      setShowResetModal(false);
+                    }}
+                    disabled={isResetting}
+                    className="flex-1 py-1.5 px-2.5 rounded-xl bg-stone-800 text-white hover:bg-stone-700 font-bold text-xs transition-colors cursor-pointer"
+                  >
+                    Muat Ulang Menu Template
+                  </button>
+                </div>
+              </div>
+
+              {/* Option 3: Kelola Bahan Baku */}
+              <div className="p-4 rounded-2xl border border-stone-200 bg-stone-50/60 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="font-extrabold text-stone-900 flex items-center space-x-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                    <span>3. Kelola Bahan Baku & Inventori</span>
+                  </div>
+                </div>
+                <p className="text-stone-600 text-[11px] leading-relaxed">
+                  Kosongkan atau muat ulang daftar bahan baku default (biji kopi, susu, sirup aren, cup takeaway).
+                </p>
+                <div className="flex items-center space-x-2 pt-1">
+                  <button
+                    onClick={async () => {
+                      await handleClearInventory();
+                      setShowResetModal(false);
+                    }}
+                    disabled={isResetting}
+                    className="flex-1 py-1.5 px-2.5 rounded-xl bg-white border border-stone-300 text-stone-700 hover:bg-stone-100 font-bold text-xs transition-colors cursor-pointer"
+                  >
+                    Kosongkan Bahan Baku
+                  </button>
+                  <button
+                    onClick={async () => {
+                      await handleResetInventory();
+                      setShowResetModal(false);
+                    }}
+                    disabled={isResetting}
+                    className="flex-1 py-1.5 px-2.5 rounded-xl bg-stone-800 text-white hover:bg-stone-700 font-bold text-xs transition-colors cursor-pointer"
+                  >
+                    Muat Ulang Bahan Baku Template
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end pt-2 border-t border-stone-100">
+              <button
+                type="button"
+                onClick={() => setShowResetModal(false)}
+                className="px-4 py-2 rounded-xl text-stone-600 hover:bg-stone-100 font-bold text-xs"
+              >
+                Tutup
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ================= MODAL: KONFIRMASI HAPUS (MENU / MEJA / KARYAWAN) ================= */}
+      {deleteConfirmation && (
+        <div className="fixed inset-0 z-50 bg-stone-950/80 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl border border-stone-200 animate-in zoom-in-95 duration-200">
+            <div className="w-12 h-12 rounded-2xl bg-red-100 text-red-600 flex items-center justify-center mx-auto shadow-inner">
+              <Trash2 className="w-6 h-6" />
+            </div>
+
+            <div className="text-center space-y-1.5">
+              <h3 className="text-base font-extrabold text-stone-900">
+                {deleteConfirmation.type === 'menu' && 'Hapus Menu Dari Katalog?'}
+                {deleteConfirmation.type === 'table' && 'Hapus Meja Dari Denah?'}
+                {deleteConfirmation.type === 'staff' && 'Hapus Akun Karyawan?'}
+              </h3>
+              <p className="text-xs text-stone-600 leading-relaxed">
+                Apakah Anda yakin ingin menghapus <strong className="text-stone-950 font-black">"{deleteConfirmation.name}"</strong>? Item ini akan dihapus secara permanen dari sistem kafe.
+              </p>
+            </div>
+
+            <div className="flex items-center space-x-2 pt-2 border-t border-stone-100">
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmation(null)}
+                disabled={isDeletingItem}
+                className="flex-1 py-2.5 px-3 rounded-xl border border-stone-200 text-stone-700 font-bold text-xs hover:bg-stone-100 transition-colors cursor-pointer disabled:opacity-50"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                id="btn-confirm-delete-action"
+                onClick={handleExecuteDelete}
+                disabled={isDeletingItem}
+                className="flex-1 py-2.5 px-3 rounded-xl bg-red-600 hover:bg-red-700 text-white font-extrabold text-xs shadow-md transition-colors flex items-center justify-center space-x-1.5 cursor-pointer disabled:opacity-50"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{isDeletingItem ? 'Menghapus...' : 'Ya, Hapus'}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

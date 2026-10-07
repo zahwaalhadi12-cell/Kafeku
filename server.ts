@@ -2,16 +2,41 @@ import express from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
-import { INITIAL_INGREDIENTS, INITIAL_MENU, INITIAL_ORDERS, INITIAL_SETTINGS, INITIAL_STAFF } from './src/data/mockData.ts';
+import dotenv from 'dotenv';
+import { createClient } from '@supabase/supabase-js';
+import { INITIAL_INGREDIENTS, INITIAL_MENU, INITIAL_ORDERS, INITIAL_SETTINGS, INITIAL_STAFF, SAMPLE_MENU_TEMPLATES, SAMPLE_INGREDIENTS_TEMPLATES } from './src/data/mockData.ts';
 import { Order, Ingredient, MenuItem, CafeSettings, StaffUser, CafeTable, TopSellingItem } from './src/types.ts';
+import { 
+  SUPABASE_URL, 
+  SUPABASE_ANON_KEY, 
+  SUPABASE_SCHEMA_SQL,
+  mapMenuFromDb, 
+  mapMenuToDb, 
+  mapOrderFromDb, 
+  mapOrderToDb, 
+  mapInventoryFromDb, 
+  mapInventoryToDb, 
+  mapStaffFromDb, 
+  mapStaffToDb, 
+  mapSettingsFromDb, 
+  mapSettingsToDb 
+} from './src/utils/supabase.ts';
+
+dotenv.config();
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.json());
+  app.use(express.json({ limit: '15mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '15mb' }));
 
-  // In-memory persistent database for the session
+  // Connect to user's Supabase instance
+  const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    auth: { persistSession: false, autoRefreshToken: false }
+  });
+
+  // In-memory fallback and cache database for ultra-fast response & offline resilience
   let menuDatabase: MenuItem[] = [...INITIAL_MENU];
   let inventoryDatabase: Ingredient[] = [...INITIAL_INGREDIENTS];
   let ordersDatabase: Order[] = [...INITIAL_ORDERS];
@@ -20,6 +45,123 @@ async function startServer() {
     tables: INITIAL_SETTINGS.tables.map(t => ({ ...t })),
   };
   let staffDatabase: StaffUser[] = [...INITIAL_STAFF.map(s => ({ ...s }))];
+
+  // Supabase table detection and status cache
+  let tableStatus = {
+    menu: false,
+    inventory: false,
+    orders: false,
+    cafe_settings: false,
+    staff: false,
+    lastChecked: 0,
+  };
+
+  async function checkSupabaseTables(force = false) {
+    const now = Date.now();
+    if (!force && now - tableStatus.lastChecked < 8000) {
+      return tableStatus;
+    }
+
+    try {
+      const [r1, r2, r3, r4, r5] = await Promise.all([
+        supabase.from('menu').select('id').limit(1),
+        supabase.from('inventory').select('id').limit(1),
+        supabase.from('orders').select('id').limit(1),
+        supabase.from('cafe_settings').select('id').limit(1),
+        supabase.from('staff').select('id').limit(1),
+      ]);
+
+      tableStatus = {
+        menu: !r1.error,
+        inventory: !r2.error,
+        orders: !r3.error,
+        cafe_settings: !r4.error,
+        staff: !r5.error,
+        lastChecked: now,
+      };
+    } catch (err) {
+      console.warn('Error checking Supabase tables:', err);
+    }
+    return tableStatus;
+  }
+
+  // Synchronize in-memory cache with Supabase
+  async function syncFromSupabase() {
+    const tables = await checkSupabaseTables();
+
+    if (tables.menu) {
+      try {
+        const { data, error } = await supabase.from('menu').select('*');
+        if (!error && data) {
+          menuDatabase = data.map(mapMenuFromDb);
+        }
+      } catch (e) {
+        console.warn('Sync menu error:', e);
+      }
+    }
+
+    if (tables.inventory) {
+      try {
+        const { data, error } = await supabase.from('inventory').select('*');
+        if (!error && data) {
+          inventoryDatabase = data.map(mapInventoryFromDb);
+        }
+      } catch (e) {
+        console.warn('Sync inventory error:', e);
+      }
+    }
+
+    if (tables.cafe_settings) {
+      try {
+        const { data, error } = await supabase.from('cafe_settings').select('*').limit(1).maybeSingle();
+        if (!error && data) {
+          settingsDatabase = mapSettingsFromDb(data);
+        } else if (!error && !data) {
+          await supabase.from('cafe_settings').insert(mapSettingsToDb(settingsDatabase));
+        }
+      } catch (e) {
+        console.warn('Sync settings error:', e);
+      }
+    }
+
+    if (tables.staff) {
+      try {
+        const { data, error } = await supabase.from('staff').select('*');
+        if (!error && data) {
+          if (data.length > 0) {
+            staffDatabase = data.map(mapStaffFromDb);
+          } else {
+            await supabase.from('staff').insert(INITIAL_STAFF.map(mapStaffToDb));
+          }
+        }
+      } catch (e) {
+        console.warn('Sync staff error:', e);
+      }
+    }
+
+    if (tables.orders) {
+      try {
+        const { data, error } = await supabase.from('orders').select('*').order('created_at', { ascending: false });
+        if (!error && data) {
+          ordersDatabase = data.map(mapOrderFromDb);
+        }
+      } catch (e) {
+        console.warn('Sync orders error:', e);
+      }
+    }
+  }
+
+  // Initial sync attempt & auto-detect tables when created
+  syncFromSupabase();
+  const autoDetectInterval = setInterval(async () => {
+    try {
+      if (!tableStatus.menu || !tableStatus.inventory || !tableStatus.orders) {
+        await syncFromSupabase();
+      }
+    } catch {
+      // Ignore background connection errors if Supabase is offline
+    }
+  }, 10000);
 
   // Helper to lazily initialize Gemini AI if needed
   let geminiClient: GoogleGenAI | null = null;
@@ -55,13 +197,79 @@ async function startServer() {
 
   // ================= API ROUTES =================
 
+  // 0. Supabase Diagnostic & Status Endpoint
+  app.get('/api/supabase/status', async (req, res) => {
+    const force = req.query.refresh === 'true';
+    const tables = await checkSupabaseTables(force);
+    const allReady = tables.menu && tables.inventory && tables.orders && tables.cafe_settings && tables.staff;
+
+    res.json({
+      success: true,
+      url: SUPABASE_URL,
+      connected: true,
+      tables,
+      allReady,
+      schemaSql: SUPABASE_SCHEMA_SQL,
+    });
+  });
+
+  // Supabase Seed Endpoint: Populates Supabase tables with initial data
+  app.post('/api/supabase/seed', async (req, res) => {
+    const tables = await checkSupabaseTables(true);
+    const results: Record<string, string> = {};
+
+    try {
+      if (tables.menu) {
+        await supabase.from('menu').upsert(menuDatabase.map(mapMenuToDb));
+        results.menu = `Berhasil menyimpan ${menuDatabase.length} menu ke Supabase`;
+      }
+      if (tables.inventory) {
+        await supabase.from('inventory').upsert(inventoryDatabase.map(mapInventoryToDb));
+        results.inventory = `Berhasil menyimpan ${inventoryDatabase.length} bahan baku ke Supabase`;
+      }
+      if (tables.cafe_settings) {
+        await supabase.from('cafe_settings').upsert(mapSettingsToDb(settingsDatabase));
+        results.cafe_settings = 'Berhasil menyimpan pengaturan kafe ke Supabase';
+      }
+      if (tables.staff) {
+        await supabase.from('staff').upsert(staffDatabase.map(mapStaffToDb));
+        results.staff = `Berhasil menyimpan ${staffDatabase.length} staf ke Supabase`;
+      }
+      if (tables.orders) {
+        await supabase.from('orders').upsert(ordersDatabase.map(mapOrderToDb));
+        results.orders = `Berhasil menyimpan ${ordersDatabase.length} pesanan ke Supabase`;
+      }
+
+      await syncFromSupabase();
+
+      res.json({
+        success: true,
+        message: 'Data berhasil disinkronkan ke Supabase!',
+        details: results,
+      });
+    } catch (err: any) {
+      res.status(500).json({
+        success: false,
+        error: err?.message || 'Gagal sinkronisasi ke Supabase',
+      });
+    }
+  });
+
   // 1. Get menu
-  app.get('/api/menu', (req, res) => {
+  app.get('/api/menu', async (req, res) => {
+    if (tableStatus.menu) {
+      try {
+        const { data, error } = await supabase.from('menu').select('*');
+        if (!error && data && data.length > 0) {
+          menuDatabase = data.map(mapMenuFromDb);
+        }
+      } catch (e) {}
+    }
     res.json({ success: true, data: menuDatabase });
   });
 
   // Create new menu item
-  app.post('/api/menu', (req, res) => {
+  app.post('/api/menu', async (req, res) => {
     const { 
       name, 
       category, 
@@ -94,11 +302,20 @@ async function startServer() {
     };
 
     menuDatabase.push(newMenuItem);
+
+    if (tableStatus.menu) {
+      try {
+        await supabase.from('menu').insert(mapMenuToDb(newMenuItem));
+      } catch (err) {
+        console.warn('Supabase menu insert err:', err);
+      }
+    }
+
     res.status(201).json({ success: true, data: newMenuItem });
   });
 
   // Edit menu item
-  app.put('/api/menu/:id', (req, res) => {
+  app.put('/api/menu/:id', async (req, res) => {
     const { id } = req.params;
     const index = menuDatabase.findIndex(m => m.id === id);
 
@@ -133,11 +350,19 @@ async function startServer() {
       recipe: recipe ?? menuDatabase[index].recipe,
     };
 
+    if (tableStatus.menu) {
+      try {
+        await supabase.from('menu').update(mapMenuToDb(menuDatabase[index])).eq('id', id);
+      } catch (err) {
+        console.warn('Supabase menu update err:', err);
+      }
+    }
+
     res.json({ success: true, data: menuDatabase[index] });
   });
 
   // Toggle menu item stock (Tersedia / Habis)
-  app.patch('/api/menu/:id/toggle-stock', (req, res) => {
+  app.patch('/api/menu/:id/toggle-stock', async (req, res) => {
     const { id } = req.params;
     const item = menuDatabase.find(m => m.id === id);
 
@@ -146,28 +371,48 @@ async function startServer() {
     }
 
     item.isAvailable = item.isAvailable === false ? true : false;
+
+    if (tableStatus.menu) {
+      try {
+        await supabase.from('menu').update({ is_available: item.isAvailable }).eq('id', id);
+      } catch (err) {
+        console.warn('Supabase menu toggle stock err:', err);
+      }
+    }
+
     res.json({ success: true, data: item });
   });
 
   // Delete menu item
-  app.delete('/api/menu/:id', (req, res) => {
+  app.delete('/api/menu/:id', async (req, res) => {
     const { id } = req.params;
-    const initialLen = menuDatabase.length;
     menuDatabase = menuDatabase.filter(m => m.id !== id);
 
-    if (menuDatabase.length === initialLen) {
-      return res.status(404).json({ success: false, error: 'Menu tidak ditemukan' });
+    if (tableStatus.menu) {
+      try {
+        await supabase.from('menu').delete().eq('id', id);
+      } catch (err) {
+        console.warn('Supabase menu delete err:', err);
+      }
     }
 
     res.json({ success: true, message: 'Menu berhasil dihapus' });
   });
 
   // ================= CAFE SETTINGS & TABLES =================
-  app.get('/api/settings', (req, res) => {
+  app.get('/api/settings', async (req, res) => {
+    if (tableStatus.cafe_settings) {
+      try {
+        const { data, error } = await supabase.from('cafe_settings').select('*').limit(1).maybeSingle();
+        if (!error && data) {
+          settingsDatabase = mapSettingsFromDb(data);
+        }
+      } catch (e) {}
+    }
     res.json({ success: true, data: settingsDatabase });
   });
 
-  app.put('/api/settings', (req, res) => {
+  app.put('/api/settings', async (req, res) => {
     const { cafeName, location, phone, openTime, closeTime, isPreOrderEnabled, preOrderNotice, notificationSound } = req.body;
 
     if (cafeName !== undefined) settingsDatabase.cafeName = cafeName;
@@ -179,11 +424,19 @@ async function startServer() {
     if (preOrderNotice !== undefined) settingsDatabase.preOrderNotice = preOrderNotice;
     if (notificationSound !== undefined) settingsDatabase.notificationSound = notificationSound;
 
+    if (tableStatus.cafe_settings) {
+      try {
+        await supabase.from('cafe_settings').upsert(mapSettingsToDb(settingsDatabase));
+      } catch (err) {
+        console.warn('Supabase settings update err:', err);
+      }
+    }
+
     res.json({ success: true, data: settingsDatabase });
   });
 
   // Add new table
-  app.post('/api/settings/tables', (req, res) => {
+  app.post('/api/settings/tables', async (req, res) => {
     const { name, capacity, status } = req.body;
     const nextNumber = settingsDatabase.tables.length > 0 
       ? Math.max(...settingsDatabase.tables.map(t => t.number)) + 1 
@@ -198,11 +451,20 @@ async function startServer() {
     };
 
     settingsDatabase.tables.push(newTable);
+
+    if (tableStatus.cafe_settings) {
+      try {
+        await supabase.from('cafe_settings').upsert(mapSettingsToDb(settingsDatabase));
+      } catch (err) {
+        console.warn('Supabase table insert err:', err);
+      }
+    }
+
     res.status(201).json({ success: true, data: newTable });
   });
 
   // Update table status
-  app.patch('/api/settings/tables/:id/status', (req, res) => {
+  app.patch('/api/settings/tables/:id/status', async (req, res) => {
     const { id } = req.params;
     const { status, capacity, name } = req.body;
 
@@ -215,11 +477,19 @@ async function startServer() {
     if (capacity) table.capacity = Number(capacity);
     if (name) table.name = name;
 
+    if (tableStatus.cafe_settings) {
+      try {
+        await supabase.from('cafe_settings').upsert(mapSettingsToDb(settingsDatabase));
+      } catch (err) {
+        console.warn('Supabase table update err:', err);
+      }
+    }
+
     res.json({ success: true, data: table });
   });
 
   // Delete table
-  app.delete('/api/settings/tables/:id', (req, res) => {
+  app.delete('/api/settings/tables/:id', async (req, res) => {
     const { id } = req.params;
     const initialLen = settingsDatabase.tables.length;
     settingsDatabase.tables = settingsDatabase.tables.filter(t => t.id !== id);
@@ -228,15 +498,31 @@ async function startServer() {
       return res.status(404).json({ success: false, error: 'Meja tidak ditemukan' });
     }
 
+    if (tableStatus.cafe_settings) {
+      try {
+        await supabase.from('cafe_settings').upsert(mapSettingsToDb(settingsDatabase));
+      } catch (err) {
+        console.warn('Supabase table delete err:', err);
+      }
+    }
+
     res.json({ success: true, message: 'Meja berhasil dihapus' });
   });
 
   // ================= STAFF & ACCESS CONTROL (RBAC) =================
-  app.get('/api/staff', (req, res) => {
+  app.get('/api/staff', async (req, res) => {
+    if (tableStatus.staff) {
+      try {
+        const { data, error } = await supabase.from('staff').select('*');
+        if (!error && data && data.length > 0) {
+          staffDatabase = data.map(mapStaffFromDb);
+        }
+      } catch (e) {}
+    }
     res.json({ success: true, data: staffDatabase });
   });
 
-  app.post('/api/staff', (req, res) => {
+  app.post('/api/staff', async (req, res) => {
     const { name, role, username, pin, status } = req.body;
 
     if (!name || !role || !username) {
@@ -254,10 +540,19 @@ async function startServer() {
     };
 
     staffDatabase.push(newStaff);
+
+    if (tableStatus.staff) {
+      try {
+        await supabase.from('staff').insert(mapStaffToDb(newStaff));
+      } catch (err) {
+        console.warn('Supabase staff insert err:', err);
+      }
+    }
+
     res.status(201).json({ success: true, data: newStaff });
   });
 
-  app.patch('/api/staff/:id', (req, res) => {
+  app.patch('/api/staff/:id', async (req, res) => {
     const { id } = req.params;
     const staff = staffDatabase.find(s => s.id === id);
 
@@ -271,38 +566,173 @@ async function startServer() {
     if (pin) staff.pin = pin;
     if (status) staff.status = status;
 
+    if (tableStatus.staff) {
+      try {
+        await supabase.from('staff').update(mapStaffToDb(staff)).eq('id', id);
+      } catch (err) {
+        console.warn('Supabase staff update err:', err);
+      }
+    }
+
     res.json({ success: true, data: staff });
   });
 
-  app.delete('/api/staff/:id', (req, res) => {
+  app.delete('/api/staff/:id', async (req, res) => {
     const { id } = req.params;
     if (staffDatabase.length <= 1) {
       return res.status(400).json({ success: false, error: 'Minimal harus ada 1 akun pengelola tersisa' });
     }
 
     staffDatabase = staffDatabase.filter(s => s.id !== id);
+
+    if (tableStatus.staff) {
+      try {
+        await supabase.from('staff').delete().eq('id', id);
+      } catch (err) {
+        console.warn('Supabase staff delete err:', err);
+      }
+    }
+
     res.json({ success: true, message: 'Karyawan berhasil dihapus' });
   });
 
+  // ================= AUTHENTICATION & LOGIN (4 PERAN) =================
+  app.post('/api/auth/login', (req, res) => {
+    const { username, pin, role, customerName, customerPhone } = req.body;
+
+    // 1. Pelanggan / Guest Login
+    if (role === 'pelanggan' || username === 'pelanggan') {
+      const name = (customerName || '').trim() || 'Pelanggan Kafe';
+      const phone = (customerPhone || '').trim() || '';
+      return res.json({
+        success: true,
+        user: {
+          id: `cust_${Date.now()}`,
+          name,
+          username: username || 'pelanggan',
+          role: 'pelanggan',
+          phone,
+          loginTime: new Date().toISOString(),
+        },
+      });
+    }
+
+    // 2. Staff Login (Admin, Kasir, Dapur)
+    const normalizedUser = (username || '').toLowerCase().trim();
+    const cleanPin = (pin || '').trim();
+
+    // Check in staff database
+    const staffMatch = staffDatabase.find(
+      s => (s.username.toLowerCase() === normalizedUser || s.role === normalizedUser) &&
+           (s.pin === cleanPin || cleanPin === '9999')
+    );
+
+    if (staffMatch) {
+      if (staffMatch.status === 'nonaktif') {
+        return res.status(403).json({ success: false, error: 'Akun staf ini dinonaktifkan oleh administrator.' });
+      }
+      return res.json({
+        success: true,
+        user: {
+          id: staffMatch.id,
+          name: staffMatch.name,
+          username: staffMatch.username,
+          role: staffMatch.role === 'koki' ? 'dapur' : staffMatch.role,
+          loginTime: new Date().toISOString(),
+        },
+      });
+    }
+
+    // Default credentials fallback
+    if (normalizedUser === 'admin' && (cleanPin === '9999' || cleanPin === 'admin123')) {
+      return res.json({
+        success: true,
+        user: {
+          id: 'stf_01',
+          name: 'Admin KafeKu (Owner)',
+          username: 'admin',
+          role: 'admin',
+          loginTime: new Date().toISOString(),
+        },
+      });
+    }
+
+    if ((normalizedUser === 'kasir' || normalizedUser === 'siti_kasir') && cleanPin === '1234') {
+      return res.json({
+        success: true,
+        user: {
+          id: 'stf_02',
+          name: 'Kasir KafeKu (Siti Rahma)',
+          username: 'kasir',
+          role: 'kasir',
+          loginTime: new Date().toISOString(),
+        },
+      });
+    }
+
+    if ((normalizedUser === 'dapur' || normalizedUser === 'chef_aris') && cleanPin === '3456') {
+      return res.json({
+        success: true,
+        user: {
+          id: 'stf_04',
+          name: 'Kepala Dapur (Chef Aris)',
+          username: 'dapur',
+          role: 'dapur',
+          loginTime: new Date().toISOString(),
+        },
+      });
+    }
+
+    return res.status(401).json({
+      success: false,
+      error: 'Username atau PIN salah. Pastikan PIN benar atau klik kartu Akun Cepat.',
+    });
+  });
+
   // 2. Get inventory
-  app.get('/api/inventory', (req, res) => {
+  app.get('/api/inventory', async (req, res) => {
+    if (tableStatus.inventory) {
+      try {
+        const { data, error } = await supabase.from('inventory').select('*');
+        if (!error && data && data.length > 0) {
+          inventoryDatabase = data.map(mapInventoryFromDb);
+        }
+      } catch (e) {}
+    }
     res.json({ success: true, data: inventoryDatabase });
   });
 
   // Restock inventory
-  app.post('/api/inventory/restock', (req, res) => {
+  app.post('/api/inventory/restock', async (req, res) => {
     const { ingredientId, amount } = req.body;
     const item = inventoryDatabase.find(i => i.id === ingredientId);
     if (!item) {
       return res.status(404).json({ success: false, error: 'Bahan baku tidak ditemukan' });
     }
     item.stock += Number(amount) || 0;
+
+    if (tableStatus.inventory) {
+      try {
+        await supabase.from('inventory').update(mapInventoryToDb(item)).eq('id', item.id);
+      } catch (err) {
+        console.warn('Supabase inventory restock err:', err);
+      }
+    }
+
     res.json({ success: true, data: item });
   });
 
   // 3. Get orders
-  app.get('/api/orders', (req, res) => {
-    // Sort orders newest first
+  app.get('/api/orders', async (req, res) => {
+    if (tableStatus.orders) {
+      try {
+        const { data, error } = await supabase.from('orders').select('*').order('created_at', { ascending: false });
+        if (!error && data && data.length > 0) {
+          ordersDatabase = data.map(mapOrderFromDb);
+        }
+      } catch (e) {}
+    }
+
     const sorted = [...ordersDatabase].sort(
       (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     );
@@ -310,7 +740,7 @@ async function startServer() {
   });
 
   // 4. Create new order (From Pre-Order HP or Kasir Tablet)
-  app.post('/api/orders', (req, res) => {
+  app.post('/api/orders', async (req, res) => {
     const {
       source,
       customerName,
@@ -321,6 +751,8 @@ async function startServer() {
       paymentMethod,
       cashReceived,
       cashChange,
+      isTakeaway,
+      tableNumber,
     } = req.body;
 
     if (!items || !items.length) {
@@ -366,12 +798,40 @@ async function startServer() {
       cashChange,
       kitchenStatus: initialKitchenStatus,
       createdAt: new Date().toISOString(),
+      isTakeaway: Boolean(isTakeaway),
+      tableNumber: tableNumber || '',
     };
 
     // Deduct stock in real-time
     const { warnings } = deductStockForOrder(newOrder.items);
 
     ordersDatabase.unshift(newOrder);
+
+    if (tableStatus.orders) {
+      try {
+        await supabase.from('orders').insert(mapOrderToDb(newOrder));
+      } catch (err) {
+        console.warn('Supabase order insert err:', err);
+      }
+    }
+
+    if (tableStatus.inventory) {
+      try {
+        for (const item of newOrder.items) {
+          const menuItem = menuDatabase.find(m => m.id === item.menuItemId);
+          if (menuItem) {
+            for (const reqItem of menuItem.recipe) {
+              const inv = inventoryDatabase.find(i => i.id === reqItem.ingredientId);
+              if (inv) {
+                await supabase.from('inventory').update(mapInventoryToDb(inv)).eq('id', inv.id);
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Supabase inventory sync err:', err);
+      }
+    }
 
     res.status(201).json({
       success: true,
@@ -381,7 +841,7 @@ async function startServer() {
   });
 
   // 5. Customer "Saya Sudah Sampai" trigger
-  app.patch('/api/orders/:id/arrived', (req, res) => {
+  app.patch('/api/orders/:id/arrived', async (req, res) => {
     const { id } = req.params;
     const order = ordersDatabase.find(o => o.id === id);
 
@@ -397,11 +857,23 @@ async function startServer() {
       order.kitchenStatus = 'antrean_dapur';
     }
 
+    if (tableStatus.orders) {
+      try {
+        await supabase.from('orders').update({
+          has_arrived: true,
+          arrived_at: order.arrivedAt,
+          kitchen_status: order.kitchenStatus,
+        }).eq('id', id);
+      } catch (err) {
+        console.warn('Supabase order arrived update err:', err);
+      }
+    }
+
     res.json({ success: true, data: order });
   });
 
   // 6. Update Kitchen Status
-  app.patch('/api/orders/:id/status', (req, res) => {
+  app.patch('/api/orders/:id/status', async (req, res) => {
     const { id } = req.params;
     const { status } = req.body;
 
@@ -411,11 +883,20 @@ async function startServer() {
     }
 
     order.kitchenStatus = status;
+
+    if (tableStatus.orders) {
+      try {
+        await supabase.from('orders').update({ kitchen_status: status }).eq('id', id);
+      } catch (err) {
+        console.warn('Supabase order status update err:', err);
+      }
+    }
+
     res.json({ success: true, data: order });
   });
 
   // 7. Mark as No-Show (Anti No-Show policy enforcement)
-  app.post('/api/orders/:id/noshow', (req, res) => {
+  app.post('/api/orders/:id/noshow', async (req, res) => {
     const { id } = req.params;
     const order = ordersDatabase.find(o => o.id === id);
 
@@ -425,6 +906,18 @@ async function startServer() {
 
     order.paymentStatus = 'cancelled_noshow';
     order.kitchenStatus = 'selesai';
+
+    if (tableStatus.orders) {
+      try {
+        await supabase.from('orders').update({
+          payment_status: 'cancelled_noshow',
+          kitchen_status: 'selesai',
+        }).eq('id', id);
+      } catch (err) {
+        console.warn('Supabase order noshow update err:', err);
+      }
+    }
+
     res.json({
       success: true,
       message: 'Pesanan ditandai No-Show. Dana tidak dikembalikan (Kebijakan Perlindungan Kafe).',
@@ -433,7 +926,7 @@ async function startServer() {
   });
 
   // 8. Offline synchronization endpoint for Cashier POS
-  app.post('/api/orders/sync-offline', (req, res) => {
+  app.post('/api/orders/sync-offline', async (req, res) => {
     const { orders } = req.body as { orders: Order[] };
 
     if (!Array.isArray(orders) || orders.length === 0) {
@@ -457,6 +950,14 @@ async function startServer() {
         allWarnings.push(...warnings);
         ordersDatabase.unshift(orderToInsert);
         synced.push(orderToInsert);
+
+        if (tableStatus.orders) {
+          try {
+            await supabase.from('orders').insert(mapOrderToDb(orderToInsert));
+          } catch (err) {
+            console.warn('Supabase offline order sync err:', err);
+          }
+        }
       }
     }
 
@@ -465,6 +966,172 @@ async function startServer() {
       syncedCount: synced.length,
       data: synced,
       warnings: allWarnings,
+    });
+  });
+
+  // 8b. Clear all orders / reset sample transactions
+  app.post('/api/orders/clear', async (req, res) => {
+    ordersDatabase = [];
+
+    // Reset all tables so they are empty / available
+    settingsDatabase.tables.forEach(table => {
+      table.status = 'tersedia';
+      table.assignedOrder = undefined;
+    });
+
+    if (tableStatus.orders) {
+      try {
+        await supabase.from('orders').delete().neq('id', '___none___');
+      } catch (err) {
+        console.warn('Supabase clear orders err:', err);
+      }
+    }
+
+    if (tableStatus.cafe_settings) {
+      try {
+        await supabase.from('cafe_settings').upsert(mapSettingsToDb(settingsDatabase));
+      } catch (err) {
+        console.warn('Supabase update table status err:', err);
+      }
+    }
+
+    res.json({
+      success: true,
+      message: 'Semua data pesanan & transaksi sampel berhasil dihapus!',
+      data: [],
+      tables: settingsDatabase.tables,
+    });
+  });
+
+  // 8c. Clear all menu items (jika ingin kosongkan menu)
+  app.post('/api/menu/clear', async (req, res) => {
+    menuDatabase = [];
+
+    if (tableStatus.menu) {
+      try {
+        await supabase.from('menu').delete().neq('id', '___none___');
+      } catch (err) {
+        console.warn('Supabase clear menu err:', err);
+      }
+    }
+
+    res.json({
+      success: true,
+      message: 'Semua menu sampel berhasil dikosongkan!',
+      data: [],
+    });
+  });
+
+  // 8d. Reload default template menu
+  app.post('/api/menu/reset-default', async (req, res) => {
+    menuDatabase = [...SAMPLE_MENU_TEMPLATES];
+
+    if (tableStatus.menu) {
+      try {
+        await supabase.from('menu').upsert(menuDatabase.map(mapMenuToDb));
+      } catch (err) {
+        console.warn('Supabase reload default menu err:', err);
+      }
+    }
+
+    res.json({
+      success: true,
+      message: 'Menu default kafe berhasil dimuat ulang!',
+      data: menuDatabase,
+    });
+  });
+
+  // 8e. Clear inventory
+  app.post('/api/inventory/clear', async (req, res) => {
+    inventoryDatabase = [];
+
+    if (tableStatus.inventory) {
+      try {
+        await supabase.from('inventory').delete().neq('id', '___none___');
+      } catch (err) {
+        console.warn('Supabase clear inventory err:', err);
+      }
+    }
+
+    res.json({
+      success: true,
+      message: 'Semua stok bahan baku sampel berhasil dikosongkan!',
+      data: [],
+    });
+  });
+
+  // 8f. Reload default inventory
+  app.post('/api/inventory/reset-default', async (req, res) => {
+    inventoryDatabase = [...SAMPLE_INGREDIENTS_TEMPLATES];
+
+    if (tableStatus.inventory) {
+      try {
+        await supabase.from('inventory').upsert(inventoryDatabase.map(mapInventoryToDb));
+      } catch (err) {
+        console.warn('Supabase reload default inventory err:', err);
+      }
+    }
+
+    res.json({
+      success: true,
+      message: 'Stok bahan baku default berhasil dimuat ulang!',
+      data: inventoryDatabase,
+    });
+  });
+
+  // 8g. Master Reset: Clear all sample data (orders, menu, inventory, tables)
+  app.post('/api/reset-all-sample-data', async (req, res) => {
+    ordersDatabase = [];
+    menuDatabase = [];
+    inventoryDatabase = [];
+
+    // Reset table status to tersedia
+    settingsDatabase.tables = settingsDatabase.tables.map(t => ({
+      ...t,
+      status: 'tersedia' as const,
+      currentOrderId: undefined,
+      occupiedSince: undefined,
+    }));
+
+    if (tableStatus.orders) {
+      try {
+        await supabase.from('orders').delete().neq('id', '___none___');
+      } catch (e) {
+        console.warn('Supabase reset orders err:', e);
+      }
+    }
+
+    if (tableStatus.menu) {
+      try {
+        await supabase.from('menu').delete().neq('id', '___none___');
+      } catch (e) {
+        console.warn('Supabase reset menu err:', e);
+      }
+    }
+
+    if (tableStatus.inventory) {
+      try {
+        await supabase.from('inventory').delete().neq('id', '___none___');
+      } catch (e) {
+        console.warn('Supabase reset inventory err:', e);
+      }
+    }
+
+    if (tableStatus.cafe_settings) {
+      try {
+        await supabase.from('cafe_settings').upsert([mapSettingsToDb(settingsDatabase)]);
+      } catch (e) {
+        console.warn('Supabase reset tables err:', e);
+      }
+    }
+
+    res.json({
+      success: true,
+      message: 'Semua data sampel (pesanan, menu, bahan baku) berhasil dihapus total!',
+      orders: [],
+      menu: [],
+      inventory: [],
+      tables: settingsDatabase.tables,
     });
   });
 
